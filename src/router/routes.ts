@@ -4,10 +4,10 @@ const routes: RouteConfig[] = [
   {
     path: '/',
     component: () => import('layouts/MainLayout.vue'),
-    children: [{ path: '', component: () => import('src/pages/HammerJsInputOrthoTestPage.vue') }]
+    children: [{ path: '', component: () => import('src/pages/HammerJsInputTestPage.vue') }]
   },
   {
-    path: '/ortho',
+    path: '/topview',
     component: () => import('layouts/MainLayout.vue'),
     children: [{ path: '', component: () => import('src/pages/HammerJsInputOrthoTestPage.vue') }]
   },
