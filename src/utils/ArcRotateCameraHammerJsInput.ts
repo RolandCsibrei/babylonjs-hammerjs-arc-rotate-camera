@@ -21,11 +21,11 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
   /**
    * Defines the pointer angular sensibility  along the X and Y axis or how fast is the camera rotating.
    */
-  public angularSensibility = 1000
+  public angularSensibility = 2000
 
   public panningSensibility = 1000
 
-  public zoomSensibility = 1000
+  public zoomSensibility = 600
 
   /**
    * Observable for when a pointer move event occurs containing the move offset

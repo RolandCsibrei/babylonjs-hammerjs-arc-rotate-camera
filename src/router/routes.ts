@@ -4,7 +4,12 @@ const routes: RouteConfig[] = [
   {
     path: '/',
     component: () => import('layouts/MainLayout.vue'),
-    children: [{ path: '', component: () => import('src/pages/HammerJsInputTestPage.vue') }]
+    children: [{ path: '', component: () => import('src/pages/HammerJsInputOrthoTestPage.vue') }]
+  },
+  {
+    path: '/ortho',
+    component: () => import('layouts/MainLayout.vue'),
+    children: [{ path: '', component: () => import('src/pages/HammerJsInputOrthoTestPage.vue') }]
   },
 
   // Always leave this as last one,
