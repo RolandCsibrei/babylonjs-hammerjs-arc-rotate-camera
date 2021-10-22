@@ -1,0 +1,10 @@
+/dist
+/src-bex/www
+/src-capacitor
+/src-cordova
+/.quasar
+/node_modules
+/src-ssr
+.eslintrc.js
+/src/scenes/*.js
+/src/utils/fps.js

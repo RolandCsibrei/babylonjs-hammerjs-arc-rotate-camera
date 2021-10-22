@@ -1,0 +1,14 @@
+{
+  "extends": "@quasar/app/tsconfig-preset",
+  "types": ["babylonjs", "babylonjs-gui"],
+  "compilerOptions": {
+    "lib": ["esnext", "dom", "WebWorker"],
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "allowJs": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "resolveJsonModule": true
+  },
+  "include": ["src"]
+}
