@@ -81,8 +81,16 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
     })
 
     manager.on('pinchmove', e => {
-      this.camera.inertialAlphaOffset = -e.deltaX / this.angularSensibility
-      this.camera.inertialRadiusOffset = 300 / (e.scale < 1 ? -this.zoomSensibility : this.zoomSensibility)
+      if (Math.abs(e.deltaX) > 3) {
+        this.camera.inertialAlphaOffset = -e.deltaX / this.angularSensibility
+      } else {
+        this.camera.inertialAlphaOffset = 0
+      }
+      if (e.scale < 0.95 || e.scale > 1.12) {
+        this.camera.inertialRadiusOffset = 300 / (e.scale < 1 ? -this.zoomSensibility : this.zoomSensibility)
+      } else {
+        this.camera.inertialRadiusOffset = 0
+      }
     })
   }
 
