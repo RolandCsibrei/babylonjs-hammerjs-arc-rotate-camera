@@ -120,7 +120,8 @@ export class HammerJsInputTestScene extends BaseScene {
     const camera = new ArcRotateCamera('camera', 2, 1, 60, new Vector3(0, 0, 0), this._scene)
     camera.parent = cameraParent
 
-    camera.inputs.clear()
+    camera.inputs.removeByType('ArcRotateCameraPointersInput')
+    console.log(camera.inputs)
     camera.inputs.add(new ArcRotateCameraHammerJsInput())
 
     camera.attachControl(this._canvas, true)
