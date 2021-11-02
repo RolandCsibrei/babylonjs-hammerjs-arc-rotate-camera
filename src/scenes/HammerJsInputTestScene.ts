@@ -120,11 +120,18 @@ export class HammerJsInputTestScene extends BaseScene {
     const camera = new ArcRotateCamera('camera', 2, 1, 60, new Vector3(0, 0, 0), this._scene)
     camera.parent = cameraParent
 
+    // remove mouse input
     camera.inputs.removeByType('ArcRotateCameraPointersInput')
-    console.log(camera.inputs)
-    camera.inputs.add(new ArcRotateCameraHammerJsInput())
+    // add hammer js input
+    const hammerJsInput = new ArcRotateCameraHammerJsInput()
+    camera.inputs.add(hammerJsInput)
 
     camera.attachControl(this._canvas, true)
+
+    camera.mapPanning = true
+    camera.panningInertia = 0.85
+    camera.panningSensibility = 400
+    camera.angularSensibilityX = 4000
 
     // camera.lowerBetaLimit = 0.4
     // camera.upperBetaLimit = 1.55
