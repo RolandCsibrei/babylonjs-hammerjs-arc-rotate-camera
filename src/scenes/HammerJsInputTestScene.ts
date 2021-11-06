@@ -128,15 +128,15 @@ export class HammerJsInputTestScene extends BaseScene {
 
     camera.attachControl(this._canvas, true)
 
-    camera.mapPanning = true
-    camera.panningInertia = 0.85
-    camera.panningSensibility = 400
-    camera.angularSensibilityX = 4000
+    // camera.mapPanning = true
+    // camera.panningInertia = 0.85
+    // camera.panningSensibility = 400
+    // camera.angularSensibilityX = 4000
 
-    // camera.lowerBetaLimit = 0.4
-    // camera.upperBetaLimit = 1.55
-    // camera.lowerRadiusLimit = 120
-    // camera.upperRadiusLimit = 1200
+    camera.lowerBetaLimit = 0.4
+    camera.upperBetaLimit = 1.55
+    camera.lowerRadiusLimit = 2
+    camera.upperRadiusLimit = 1200
 
     // camera.inertia = 0.8
     // camera.speed = 0.05
