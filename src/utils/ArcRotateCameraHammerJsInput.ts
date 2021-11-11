@@ -1,9 +1,30 @@
+/**
+ * Google Earth like touch camera controls
+ */
+
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
-import { ArcRotateCamera, CameraInputTypes, ICameraInput, Scalar, Vector3 } from '@babylonjs/core'
+import { ArcRotateCamera, CameraInputTypes, Color3, ICameraInput, MeshBuilder, StandardMaterial, Vector2, Vector3 } from '@babylonjs/core'
 
 import 'hammerjs'
+
+interface DoubleTouchInfo {
+  center: Vector2
+  deltaCenter: Vector2
+  angle: number
+  deltaAngle: number
+  distance: number
+  deltaDistance: number
+}
+
+interface TouchInfo {
+  x: number
+  y: number
+  deltaCenter: Vector2
+  distance: number
+  deltaDistance: number
+}
 
 /**
  * Manage the mouse inputs to control the movement of a free camera.
@@ -32,14 +53,15 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
     public rotationSensibilityBeta = 400,
     public panningSensibility = 400,
     public zoomSensibility = 80,
-    public xPanningRatio = 2 / 30,
-    public zPanningRatio = 4 / 30,
+    public xPanningRatio = 2 / 60,
+    public zPanningRatio = 4 / 60,
     public xPanningTreshold = 40,
     public yPanningTreshold = 40,
     public rotationTreshold = 10,
     public zoomLowerTreshold = 0.85,
     public zoomUpperTreshold = 1.2,
-    public tiltTouchDistanceTresholdInPixels = 100
+    public tiltTouchDistanceTresholdInPixelsX = 50,
+    public tiltTouchDistanceTresholdInPixelsY = 50
   ) {}
 
   /**
@@ -53,20 +75,29 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
     const manager = new Hammer.Manager(element)
 
     const rotate = new Hammer.Rotate()
-    const pinch = new Hammer.Pinch()
-    const pan = new Hammer.Pan()
+    const pan = new Hammer.Pan({ threshold: 0 })
 
-    manager.add([pinch, pan, rotate])
-    manager.get('pan').set({ enable: true, threshold: 60 })
-    manager.get('pinch').set({ enable: true, threshold: 0 })
-    manager.get('rotate').set({ enable: true, threshold: 60 })
-
-    // rotate.recognizeWith([Pan])
-    // pinch.recognizeWith([rotate])
-
-    manager.add(pan)
     manager.add(rotate)
-    manager.add(pinch)
+    manager.add(pan)
+
+    const scene = this.camera.getScene()
+
+    // DEBUG markers
+    const size = 1
+    const centerMarker = MeshBuilder.CreateBox('centerMarker', { size: 0.5 }, scene)
+    const centerMarkerMaterial = new StandardMaterial('centerMarkerMaterial', scene)
+    centerMarkerMaterial.emissiveColor = Color3.Green()
+    centerMarker.material = centerMarkerMaterial
+
+    const touch1Marker = MeshBuilder.CreateBox('touch1marker', { size }, scene)
+    const touch1MarkerMaterial = new StandardMaterial('touch1MarkerMaterial', scene)
+    touch1MarkerMaterial.emissiveColor = Color3.Red()
+    touch1Marker.material = touch1MarkerMaterial
+
+    const touch2Marker = MeshBuilder.CreateBox('touch2marker', { size }, scene)
+    const touch2MarkerMaterial = new StandardMaterial('touch2MarkerMaterial', scene)
+    touch2MarkerMaterial.emissiveColor = Color3.Blue()
+    touch2Marker.material = touch2MarkerMaterial
 
     let startPosition = Vector3.Zero()
     let startTarget = Vector3.Zero()
@@ -74,158 +105,275 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
     let startCenterX = 0
     let startCenterY = 0
 
-    let startRotation = 0
     let startAlpha = 0
     let startBeta = 0
 
-    let startScale = 0
     let startRadius = 0
 
+    let isBetaPanning = false
+    let isPanning = false
     let isRotating = false
-    manager.on('panstart', e => {
-      startCenterX = e.center.x
-      startCenterY = e.center.y
-
-      startPosition = this.camera.position.clone()
-      startTarget = this.camera.target.clone()
-    })
 
     let firstTouchLow = false
 
-    manager.on('pinchstart', e => {
-      startBeta = this.camera.beta
-    })
+    //
 
-    manager.on('rotatestart', e => {
-      isRotating = true
+    let oldPointer0: TouchInfo
+    let startPointer0: TouchInfo
+    let oldPointer1: TouchInfo
+    let startPointer1: TouchInfo
 
-      startRotation = e.rotation
-      startAlpha = this.camera.alpha
+    //
 
-      switched = false
+    // let oldInfo: DoubleTouchInfo = {
+    //   center: new Vector2(),
+    //   deltaCenter: new Vector2(),
+    //   angle: 0,
+    //   deltaAngle: 0,
+    //   distance: 0,
+    //   deltaDistance: 0
+    // }
 
-      const sy1 = e.pointers[0].screenY
-      const sy2 = e.pointers[1].screenY
-      if (sy1 > sy2) {
-        firstTouchLow = true
-      } else {
-        firstTouchLow = false
-      }
+    let startInfo: DoubleTouchInfo = {
+      center: new Vector2(),
+      deltaCenter: new Vector2(),
+      angle: 0,
+      deltaAngle: 0,
+      distance: 0,
+      deltaDistance: 0
+    }
 
-      startScale = e.scale
-      startRadius = this.camera.radius
-    })
+    manager.on('panstart', e => {
+      if (!isRotating || !isBetaPanning) {
+        // console.log('panstart')
+        oldPointer0 = { x: e.pointers[0].clientX, y: e.pointers[0].clientY, deltaCenter: new Vector2(), distance: 0, deltaDistance: 0 }
+        startPointer0 = { x: e.pointers[0].clientX, y: e.pointers[0].clientY, deltaCenter: new Vector2(), distance: 0, deltaDistance: 0 }
 
-    manager.on('pinch', e => {
-      const sy1 = e.pointers[0].screenY
-      const sy2 = e.pointers[1].screenY
-      const ds = Math.abs(sy1 - sy2)
-      if (ds < this.tiltTouchDistanceTresholdInPixels) {
-        this.camera.beta = startBeta + e.deltaY / this.rotationSensibilityBeta
+        isPanning = true
+        startCenterX = e.pointers[0].clientX
+        startCenterY = e.pointers[0].clientY
+
+        startPosition = this.camera.position.clone()
+        startTarget = this.camera.target.clone()
       }
     })
 
     manager.on('pan', e => {
-      if (!e.isFinal) {
-        const dx = -(startCenterX - e.center.x) * this.xPanningRatio
-        const dy = (startCenterY - e.center.y) * this.zPanningRatio
-
-        // rotate the position according to camera.alpha
-        const alpha = this.camera.alpha - Math.PI / 2
-        const c = Math.cos(alpha)
-        const s = Math.sin(alpha)
-        const x1 = dx
-        const y1 = dy
-        const x2 = c * x1 - s * y1
-        const y2 = s * x1 + c * y1
-
-        const v2 = new Vector3(x2, 0, y2)
-        const amount = 0.5
-        this.camera.position.x = Scalar.Lerp(this.camera.position.x, startPosition.x + v2.x, amount)
-        this.camera.position.z = Scalar.Lerp(this.camera.position.z, startPosition.z + v2.z, amount)
-
-        this.camera.target.x = Scalar.Lerp(this.camera.target.x, startTarget.x + v2.x, amount)
-        this.camera.target.z = Scalar.Lerp(this.camera.target.z, startTarget.z + v2.z, amount)
-
-        this.camera.rebuildAnglesAndRadius()
+      if (!isRotating || !isBetaPanning) {
+        const dx = -(startCenterX - e.pointers[0].clientX) * this.xPanningRatio
+        const dy = (startCenterY - e.pointers[0].clientY) * this.zPanningRatio
+        panMove(dx, dy)
       }
     })
 
-    //
-    //   PROTOTYPE - THIS NEEDS TO BE REFACTORED
-    //
-    let lastNonSwitchedRotation: number | null = null
-    let switched = false //lastRotation >= 0 && e.rotation < 0 // && lastAngle <= 0 && e.angle > 0
+    manager.on('panend', e => {
+      if (!isRotating || !isBetaPanning) {
+        // console.log('panend')
+        isPanning = false
+      }
+    })
+
+    manager.on('rotateend', e => {
+      // console.log('rotateend')
+      setTimeout(() => {
+        isRotating = false
+        isBetaPanning = false
+      }, 300)
+    })
+
+    manager.on('rotatestart', e => {
+      // console.log('rotatestart')
+
+      isRotating = true
+
+      const sx0 = e.pointers[0].clientX
+      const sx1 = e.pointers[1].clientX
+      const sy0 = e.pointers[0].clientY
+      const sy1 = e.pointers[1].clientY
+      if (sy0 > sy1) {
+        firstTouchLow = true
+      } else {
+        firstTouchLow = false
+      }
+      oldPointer0 = { x: e.pointers[0].clientX, y: e.pointers[0].clientY, deltaCenter: new Vector2(), distance: 0, deltaDistance: 0 }
+      oldPointer1 = { x: e.pointers[1].clientX, y: e.pointers[1].clientY, deltaCenter: new Vector2(), distance: 0, deltaDistance: 0 }
+
+      startPointer0 = { x: e.pointers[0].clientX, y: e.pointers[0].clientY, deltaCenter: new Vector2(), distance: 0, deltaDistance: 0 }
+      startPointer1 = { x: e.pointers[1].clientX, y: e.pointers[1].clientY, deltaCenter: new Vector2(), distance: 0, deltaDistance: 0 }
+
+      //
+
+      //
+
+      if (
+        Math.abs(startPointer0.y - startPointer1.y) < this.tiltTouchDistanceTresholdInPixelsY &&
+        Math.abs(startPointer0.x - startPointer1.x) > this.tiltTouchDistanceTresholdInPixelsX
+      ) {
+        isBetaPanning = true
+      } else {
+        isBetaPanning = false
+      }
+      startPosition = this.camera.position.clone()
+      startTarget = this.camera.target.clone()
+
+      const info = getCenterAngleDistance(startPointer0, startPointer1)
+
+      startInfo = { ...info }
+
+      //
+
+      startAlpha = this.camera.alpha
+      startBeta = this.camera.beta
+      startRadius = this.camera.radius
+    })
+
     manager.on('rotate', e => {
-      console.log('rotate')
-      if (!e.isFinal) {
-        const sx1 = e.pointers[0].screenX
-        const sx2 = e.pointers[1].screenX
-        const sy1 = e.pointers[0].screenY
-        const sy2 = e.pointers[1].screenY
-        const ds = Math.abs(sy1 - sy2)
-        let rot = e.rotation
+      const p0 = processPointer(e.pointers[0], oldPointer0, startPointer0)
+      const p1 = processPointer(e.pointers[1], oldPointer1, startPointer1)
+      const info = getCenterAngleDistance(p0, p1)
 
-        let deltaRotation = 0
-        if (firstTouchLow) {
-          if (sy1 < sy2 && sx1 < sx2) {
-            // console.log('changed')
-            rot = 360 + e.rotation
-            switched = true
-          } else if (sy2 < sy1) {
-            // console.log('changed 2')
-            switched = false
-          }
-          deltaRotation = startRotation - rot
-        } else {
-          if (sy2 <= sy1 && sx1 < sx2) {
-            if (!switched) {
-              lastNonSwitchedRotation = e.rotation
-              deltaRotation = e.rotation
-            } else {
-              // console.log('changed 3')
-              rot = e.rotation
-              if (lastNonSwitchedRotation !== null) {
-                deltaRotation = 2 * lastNonSwitchedRotation - rot
-              } else {
-                deltaRotation = rot
-              }
-            }
-            switched = true
-          } else {
-            deltaRotation = startRotation - rot
-          }
+      let addAngle = 0
+      if (firstTouchLow) {
+        //   if (p0.y === p1.y && p0.x < p1.x) {
+        //     addAngle = Math.PI
+        //   }
+        //   if (p0.y === p1.y && p0.x > p1.x) {
+        //     addAngle = Math.PI
+        //   }
+
+        if (p0.y < p1.y && p0.x < p1.x) {
+          addAngle = Math.PI
         }
-        // console.log(
-        //   'e.rotation',
-        //   e.rotation,
-        //   'e.angle',
-        //   e.angle,
-        //   'sy1',
-        //   sy1,
-        //   'sy2',
-        //   sy2,
-        //   'startRotation',
-        //   startRotation,
-        //   'deltaRotation',
-        //   deltaRotation,
-        //   'switched',
-        //   switched,
-        //   'lastNonSwitchedRotation',
-        //   lastNonSwitchedRotation
-        // )
-
-        if (ds > this.tiltTouchDistanceTresholdInPixels || isRotating) {
-          this.camera.alpha = startAlpha - deltaRotation / this.rotationSensibilityAlpha
-          // console.log(e.rotation, deltaRotation)
-
-          const deltaScale = startScale - e.scale
-          this.camera.radius = startRadius - deltaScale * this.zoomSensibility
+        if (p0.y < p1.y && p0.x > p1.x) {
+          addAngle = -Math.PI
         }
       } else {
-        isRotating = false
+        if (p0.y > p1.y && p0.x < p1.x) {
+          addAngle = -Math.PI
+        }
+        if (p0.y > p1.y && p0.x > p1.x) {
+          addAngle = Math.PI
+        }
       }
+
+      // DEBUG MARKERS
+      // const s = 0.04
+      // touch1Marker.position = new Vector3(p0.x, 1, p0.y).scale(s)
+      // touch2Marker.position = new Vector3(p1.x, 1, p1.y).scale(s)
+      // centerMarker.position = new Vector3(info.center.x, 1, info.center.y).scale(s)
+
+      // touch1Marker.position.x -= 40
+      // touch2Marker.position.x -= 40
+      // centerMarker.position.x -= 40
+      // touch1Marker.position.z -= 40
+      // touch2Marker.position.z -= 40
+      // centerMarker.position.z -= 40
+      //
+
+      const deltaAngle = info.deltaAngle + addAngle
+
+      if (!isBetaPanning) {
+        this.camera.alpha = startAlpha + deltaAngle / 2
+        panMove(info.deltaCenter.x / 20, info.deltaCenter.y / 20)
+
+        this.camera.radius = startRadius + info.deltaDistance / 10
+
+        // console.log(
+        //   'startAlpha',
+        //   (startAlpha * 180) / Math.PI,
+        //   'startInfo.angle',
+        //   (startInfo.angle * 180) / Math.PI,
+        //   'angle',
+        //   (info.angle * 180) / Math.PI,
+        //   'addAngle',
+        //   (addAngle * 180) / Math.PI,
+        //   'deltaAngle',
+        //   (deltaAngle * 180) / Math.PI,
+        //   'info.deltaCenter.x',
+        //   info.deltaCenter.x,
+        //   'info.deltaCenter.y',
+        //   info.deltaCenter.y,
+        //   'p0',
+        //   p0.x,
+        //   p0.y,
+        //   'p1',
+        //   p1.x,
+        //   p1.y,
+        //   'firstTouchLow',
+        //   firstTouchLow
+        // )
+      } else {
+        this.camera.beta = startBeta + info.deltaCenter.y / 400
+      }
+
+      oldPointer0.x = e.pointers[0].clientX
+      oldPointer0.y = e.pointers[0].clientY
+
+      oldPointer1.x = e.pointers[1].clientX
+      oldPointer1.y = e.pointers[1].clientY
     })
+
+    const panMove = (dx: number, dy: number) => {
+      // console.log('panMove', dx, dy)
+      // rotate the position according to camera.alpha
+      const alpha = this.camera.alpha - Math.PI / 2
+      const c = Math.cos(alpha)
+      const s = Math.sin(alpha)
+      const x1 = dx
+      const y1 = dy
+      const x2 = c * x1 - s * y1
+      const y2 = s * x1 + c * y1
+
+      this.camera.position.x = startPosition.x + x2
+      this.camera.position.z = startPosition.z + y2
+
+      this.camera.target.x = startTarget.x + x2
+      this.camera.target.z = startTarget.z + y2
+    }
+
+    const processPointer = (e: PointerEvent, oldPointer: TouchInfo, startPointer: TouchInfo) => {
+      const dx = startPointer.x - e.clientX
+      const dy = startPointer.y - e.clientY
+      const distance = Math.sqrt(dx * dx + dy * dy)
+      const deltaDistance = startInfo.distance - distance
+      const touchInfo: TouchInfo = {
+        x: e.clientX,
+        y: e.clientY,
+        deltaCenter: new Vector2(dx, dy),
+        distance,
+        deltaDistance
+      }
+
+      return touchInfo
+    }
+
+    const getCenterAngleDistance = (p0: TouchInfo, p1: TouchInfo): DoubleTouchInfo => {
+      const maxX = Math.max(p0.x, p1.x)
+      const maxY = Math.max(p0.y, p1.y)
+      const minX = Math.min(p0.x, p1.x)
+      const minY = Math.min(p0.y, p1.y)
+
+      const touchWidth = p0.x - p1.x
+      const touchHeight = p0.y - p1.y
+
+      const center = new Vector2((maxX - minX) / 2 + minX, (maxY - minY) / 2 + minY)
+      const deltaCenter = new Vector2(center.x - startInfo.center.x, startInfo.center.y - center.y)
+
+      const angle = Math.atan(touchWidth / touchHeight)
+
+      const deltaAngle = startInfo.angle - angle
+      const distance = Math.sqrt(touchWidth * touchWidth + touchHeight * touchHeight)
+      const deltaDistance = startInfo.distance - distance
+
+      return {
+        center,
+        deltaCenter,
+        angle,
+        deltaAngle,
+        distance,
+        deltaDistance
+      }
+    }
   }
 
   /**
