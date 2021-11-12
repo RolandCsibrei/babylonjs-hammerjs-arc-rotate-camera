@@ -51,6 +51,8 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
    */
   public camera!: ArcRotateCamera
 
+  public showDebug = true
+
   //
 
   private _startPointer0: TouchInfo
@@ -130,8 +132,7 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
 
     const scene = this.camera.getScene()
 
-    const debugMode = true
-    if (debugMode && scene.activeCameras) {
+    if (this.showDebug && scene.activeCameras) {
       if (scene.activeCameras?.length === 0 && scene.activeCamera) {
         scene.activeCameras.push(scene.activeCamera)
       }
@@ -317,44 +318,45 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
     //
 
     manager.on('panstart', e => {
-      if (!isRotating || !isBetaPanning) {
-        // console.log('panstart')
-        this._oldPointer0 = { x: e.pointers[0].clientX, y: e.pointers[0].clientY, deltaCenter: new Vector2(), distance: 0, deltaDistance: 0 }
-        this._oldPointer1 = { x: e.pointers[0].clientX, y: e.pointers[0].clientY, deltaCenter: new Vector2(), distance: 0, deltaDistance: 0 }
-        this._startPointer0 = { x: e.pointers[0].clientX, y: e.pointers[0].clientY, deltaCenter: new Vector2(), distance: 0, deltaDistance: 0 }
-        this._startPointer1 = { x: e.pointers[0].clientX, y: e.pointers[0].clientY, deltaCenter: new Vector2(), distance: 0, deltaDistance: 0 }
-        const info = getCenterAngleDistance(this._startPointer0, this._startPointer1)
-        this._oldInfo = { ...info }
-        this._startInfo = { ...info }
-
-        isPanning = true
-        startCenterX = e.pointers[0].clientX
-        startCenterY = e.pointers[0].clientY
-
-        startPosition = this.camera.position.clone()
-        startTarget = this.camera.target.clone()
+      if (isRotating || isBetaPanning) {
+        return
       }
+
+      // console.log('panstart')
+      this._oldPointer0 = { x: e.pointers[0].clientX, y: e.pointers[0].clientY, deltaCenter: new Vector2(), distance: 0, deltaDistance: 0 }
+      this._oldPointer1 = { x: e.pointers[0].clientX, y: e.pointers[0].clientY, deltaCenter: new Vector2(), distance: 0, deltaDistance: 0 }
+      this._startPointer0 = { x: e.pointers[0].clientX, y: e.pointers[0].clientY, deltaCenter: new Vector2(), distance: 0, deltaDistance: 0 }
+      this._startPointer1 = { x: e.pointers[0].clientX, y: e.pointers[0].clientY, deltaCenter: new Vector2(), distance: 0, deltaDistance: 0 }
+      const info = getCenterAngleDistance(this._startPointer0, this._startPointer1)
+      this._oldInfo = { ...info }
+      this._startInfo = { ...info }
+
+      isPanning = true
+      startCenterX = e.pointers[0].clientX
+      startCenterY = e.pointers[0].clientY
+
+      startPosition = this.camera.position.clone()
+      startTarget = this.camera.target.clone()
     })
 
     manager.on('pan', e => {
-      if (!isRotating || !isBetaPanning) {
-        const dx = -(startCenterX - e.pointers[0].clientX) * this.xPanningRatio
-        const dy = (startCenterY - e.pointers[0].clientY) * this.zPanningRatio
-        panMove(dx, dy)
-
-        this._oldPointer0.x = e.pointers[0].clientX
-        this._oldPointer0.y = e.pointers[0].clientY
-
-        this._oldPointer1.x = e.pointers[0].clientX
-        this._oldPointer1.y = e.pointers[0].clientY
+      if (isRotating || isBetaPanning) {
+        return
       }
+      const dx = -(startCenterX - e.pointers[0].clientX) * this.xPanningRatio
+      const dy = (startCenterY - e.pointers[0].clientY) * this.zPanningRatio
+      panMove(dx, dy)
+
+      this._oldPointer0.x = e.pointers[0].clientX
+      this._oldPointer0.y = e.pointers[0].clientY
+
+      this._oldPointer1.x = e.pointers[0].clientX
+      this._oldPointer1.y = e.pointers[0].clientY
     })
 
     manager.on('panend', e => {
-      if (!isRotating || !isBetaPanning) {
-        // console.log('panend')
-        isPanning = false
-      }
+      // console.log('panend')
+      isPanning = false
     })
 
     manager.on('rotateend', e => {
@@ -362,7 +364,7 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
       setTimeout(() => {
         isRotating = false
         isBetaPanning = false
-      }, 300)
+      }, 1000)
     })
 
     manager.on('rotatestart', e => {
@@ -472,32 +474,32 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
         this.camera.beta = startBeta + info.deltaCenter.y / 400
       }
 
-      // console.log(
-      //   'startAlpha',
-      //   (startAlpha * 180) / Math.PI,
-      //   'startInfo.angle',
-      //   (this._startInfo.angle * 180) / Math.PI,
-      //   'angle',
-      //   (info.angle * 180) / Math.PI,
-      //   'addAngle',
-      //   (addAngle * 180) / Math.PI,
-      //   'deltaAngle',
-      //   (deltaAngle * 180) / Math.PI,
-      //   'info.deltaCenter.x',
-      //   info.deltaCenter.x,
-      //   'info.deltaCenter.y',
-      //   info.deltaCenter.y,
-      //   'p0',
-      //   p0.x,
-      //   p0.y,
-      //   'p1',
-      //   p1.x,
-      //   p1.y,
-      //   'firstTouchLow',
-      //   firstTouchLow,
-      //   'distance',
-      //   info.distance
-      // )
+      console.log(
+        'startAlpha',
+        (startAlpha * 180) / Math.PI,
+        'startInfo.angle',
+        (this._startInfo.angle * 180) / Math.PI,
+        'angle',
+        (info.angle * 180) / Math.PI,
+        'addAngle',
+        (addAngle * 180) / Math.PI,
+        'deltaAngle',
+        (deltaAngle * 180) / Math.PI,
+        'info.deltaCenter.x',
+        info.deltaCenter.x,
+        'info.deltaCenter.y',
+        info.deltaCenter.y,
+        'p0',
+        p0.x,
+        p0.y,
+        'p1',
+        p1.x,
+        p1.y,
+        'firstTouchLow',
+        firstTouchLow,
+        'distance',
+        info.distance
+      )
 
       this._oldPointer0.x = e.pointers[0].clientX
       this._oldPointer0.y = e.pointers[0].clientY
