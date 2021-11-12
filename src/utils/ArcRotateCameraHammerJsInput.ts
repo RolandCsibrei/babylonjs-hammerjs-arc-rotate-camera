@@ -5,9 +5,10 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
-import { ArcRotateCamera, CameraInputTypes, Color3, ICameraInput, MeshBuilder, StandardMaterial, Vector2, Vector3 } from '@babylonjs/core'
+import { ArcRotateCamera, Camera, CameraInputTypes, Color3, FreeCamera, ICameraInput, MeshBuilder, StandardMaterial, Vector2, Vector3 } from '@babylonjs/core'
 
 import 'hammerjs'
+import { screenToWorld, worldToScreen } from './babylonjs'
 
 interface DoubleTouchInfo {
   center: Vector2
@@ -38,10 +39,14 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
 
   //
 
-  private _oldPointer0: TouchInfo
   private _startPointer0: TouchInfo
-  private _oldPointer1: TouchInfo
+  private _oldPointer0: TouchInfo
+
   private _startPointer1: TouchInfo
+  private _oldPointer1: TouchInfo
+
+  private _startInfo: DoubleTouchInfo
+  private _oldInfo: DoubleTouchInfo
 
   /**
    * Manage the mouse inputs to control the movement of a free camera.
@@ -71,7 +76,27 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
 
     this._oldPointer1 = { x: 0, y: 0, deltaCenter: new Vector2(), distance: 0, deltaDistance: 0 }
     this._startPointer1 = { x: 0, y: 0, deltaCenter: new Vector2(), distance: 0, deltaDistance: 0 }
+
+    this._oldInfo = {
+      center: new Vector2(),
+      deltaCenter: new Vector2(),
+      angle: 0,
+      deltaAngle: 0,
+      distance: 0,
+      deltaDistance: 0
+    }
+
+    this._startInfo = {
+      center: new Vector2(),
+      deltaCenter: new Vector2(),
+      angle: 0,
+      deltaAngle: 0,
+      distance: 0,
+      deltaDistance: 0
+    }
   }
+
+  private _debugCamera?: ArcRotateCamera
 
   /**
    * Attach the input controls to a specific dom element to get the input from.
@@ -90,6 +115,66 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
     manager.add(pan)
 
     const scene = this.camera.getScene()
+
+    const debugMode = true
+    if (debugMode && scene.activeCameras) {
+      if (scene.activeCameras?.length === 0 && scene.activeCamera) {
+        scene.activeCameras.push(scene.activeCamera)
+      }
+
+      const secondCamera = new FreeCamera('debugCamera', new Vector3(0, 0, -30), scene)
+      secondCamera.layerMask = 0x20000000
+      scene.activeCameras.push(secondCamera)
+
+      this._debugCamera = new ArcRotateCamera('debugCamera', 0, 0, 10, Vector3.Zero(), scene)
+      this._debugCamera.layerMask = 0x20000000
+
+      const size = 1
+      const centerMarker = MeshBuilder.CreateBox('centerMarker', { size: 0.5 }, scene)
+      const centerMarkerMaterial = new StandardMaterial('centerMarkerMaterial', scene)
+      centerMarkerMaterial.emissiveColor = Color3.Green()
+      centerMarker.material = centerMarkerMaterial
+      centerMarker.layerMask = 0x20000000
+
+      const touch1Marker = MeshBuilder.CreateBox('touch1marker', { size }, scene)
+      const touch1MarkerMaterial = new StandardMaterial('touch1MarkerMaterial', scene)
+      touch1MarkerMaterial.emissiveColor = Color3.Red()
+      touch1Marker.material = touch1MarkerMaterial
+      touch1Marker.layerMask = 0x20000000
+
+      const touch2Marker = MeshBuilder.CreateBox('touch2marker', { size }, scene)
+      const touch2MarkerMaterial = new StandardMaterial('touch2MarkerMaterial', scene)
+      touch2MarkerMaterial.emissiveColor = Color3.Blue()
+      touch2Marker.material = touch2MarkerMaterial
+      touch2Marker.layerMask = 0x20000000
+
+      const mapValue = (value: number, x1: number, y1: number, x2: number, y2: number) => ((value - x1) * (y2 - x2)) / (y1 - x1) + x2
+      const renderWidth = engine.getRenderWidth()
+      const renderHeight = engine.getRenderHeight()
+      scene.onBeforeRenderObservable.add(() => {
+        // DEBUG MARKERS
+        const rw = 22
+        const rh = 12
+
+        let x = mapValue(this._oldPointer0.x, 0, renderWidth, -rw, rw)
+        let y = mapValue(this._oldPointer0.y, 0, renderHeight, rh, -rh)
+        touch1Marker.position.x = x
+        touch1Marker.position.y = y
+        touch1Marker.position.z = 0
+
+        x = mapValue(this._oldPointer1.x, 0, renderWidth, -rw, rw)
+        y = mapValue(this._oldPointer1.y, 0, renderHeight, rh, -rh)
+        touch2Marker.position.x = x
+        touch2Marker.position.y = y
+        touch2Marker.position.z = 0
+
+        x = mapValue(this._oldInfo.center.x, 0, renderWidth, -rw, rw)
+        y = mapValue(this._oldInfo.center.y, 0, renderHeight, rh, -rh)
+        centerMarker.position.x = x
+        centerMarker.position.y = y
+        centerMarker.position.z = 0
+      })
+    }
 
     // DEBUG markers
     const size = 1
@@ -126,24 +211,6 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
     let firstTouchLow = false
 
     //
-
-    // let oldInfo: DoubleTouchInfo = {
-    //   center: new Vector2(),
-    //   deltaCenter: new Vector2(),
-    //   angle: 0,
-    //   deltaAngle: 0,
-    //   distance: 0,
-    //   deltaDistance: 0
-    // }
-
-    let startInfo: DoubleTouchInfo = {
-      center: new Vector2(),
-      deltaCenter: new Vector2(),
-      angle: 0,
-      deltaAngle: 0,
-      distance: 0,
-      deltaDistance: 0
-    }
 
     manager.on('panstart', e => {
       if (!isRotating || !isBetaPanning) {
@@ -203,6 +270,24 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
       this._startPointer0 = { x: e.pointers[0].clientX, y: e.pointers[0].clientY, deltaCenter: new Vector2(), distance: 0, deltaDistance: 0 }
       this._startPointer1 = { x: e.pointers[1].clientX, y: e.pointers[1].clientY, deltaCenter: new Vector2(), distance: 0, deltaDistance: 0 }
 
+      this._oldInfo = {
+        center: new Vector2(),
+        deltaCenter: new Vector2(),
+        angle: 0,
+        deltaAngle: 0,
+        distance: 0,
+        deltaDistance: 0
+      }
+
+      this._startInfo = {
+        center: new Vector2(),
+        deltaCenter: new Vector2(),
+        angle: 0,
+        deltaAngle: 0,
+        distance: 0,
+        deltaDistance: 0
+      }
+
       //
 
       //
@@ -220,7 +305,7 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
 
       const info = getCenterAngleDistance(this._startPointer0, this._startPointer1)
 
-      startInfo = { ...info }
+      this._startInfo = { ...info }
 
       //
 
@@ -313,6 +398,8 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
 
       this._oldPointer1.x = e.pointers[1].clientX
       this._oldPointer1.y = e.pointers[1].clientY
+
+      this._oldInfo = { ...info }
     })
 
     const panMove = (dx: number, dy: number) => {
@@ -337,7 +424,7 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
       const dx = startPointer.x - e.clientX
       const dy = startPointer.y - e.clientY
       const distance = Math.sqrt(dx * dx + dy * dy)
-      const deltaDistance = startInfo.distance - distance
+      const deltaDistance = this._startInfo.distance - distance
       const touchInfo: TouchInfo = {
         x: e.clientX,
         y: e.clientY,
@@ -359,13 +446,13 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
       const touchHeight = p0.y - p1.y
 
       const center = new Vector2((maxX - minX) / 2 + minX, (maxY - minY) / 2 + minY)
-      const deltaCenter = new Vector2(center.x - startInfo.center.x, startInfo.center.y - center.y)
+      const deltaCenter = new Vector2(center.x - this._startInfo.center.x, this._startInfo.center.y - center.y)
 
       const angle = Math.atan(touchWidth / touchHeight)
 
-      const deltaAngle = startInfo.angle - angle
+      const deltaAngle = this._startInfo.angle - angle
       const distance = Math.sqrt(touchWidth * touchWidth + touchHeight * touchHeight)
-      const deltaDistance = startInfo.distance - distance
+      const deltaDistance = this._startInfo.distance - distance
 
       return {
         center,
