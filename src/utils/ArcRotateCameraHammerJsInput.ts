@@ -124,8 +124,8 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
     const element = <EventTarget>engine.getInputElement()
     const manager = new Hammer.Manager(element)
 
-    const rotate = new Hammer.Rotate()
-    const pan = new Hammer.Pan({ threshold: 0 })
+    const rotate = new Hammer.Rotate({ threshold: 60, posThreshold: 60 })
+    const pan = new Hammer.Pan({ threshold: 60, posThreshold: 60 })
 
     manager.add(rotate)
     manager.add(pan)
@@ -164,6 +164,7 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
       this._debugCamera.layerMask = 0x20000000
 
       const diameter = 1
+
       const centerMarker = MeshBuilder.CreateSphere('centerMarker', { diameter: 0.5 }, scene)
       const centerMarkerMaterial = new StandardMaterial('centerMarkerMaterial', scene)
       centerMarkerMaterial.emissiveColor = Color3.Gray()
@@ -180,6 +181,9 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
       touch1Marker.material = touch1MarkerMaterial
       touch1Marker.layerMask = 0x20000000
       touch1Marker.visibility = 0.6
+      touch1Marker.outlineColor = Color3.Gray()
+      touch1Marker.outlineWidth = 0.1
+      touch1Marker.renderOutline = true
       const touch1Button = this._addDebugButton(1, adt)
 
       const touch2Marker = MeshBuilder.CreateSphere('touch2marker', { diameter }, scene)
@@ -189,7 +193,20 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
       touch2Marker.material = touch2MarkerMaterial
       touch2Marker.layerMask = 0x20000000
       touch2Marker.visibility = 0.6
+      touch2Marker.outlineColor = Color3.Gray()
+      touch2Marker.outlineWidth = 0.1
+      touch2Marker.renderOutline = true
       const touch2Button = this._addDebugButton(2, adt)
+
+      const startTouch1Marker = MeshBuilder.CreateSphere('startTouch1marker', { diameter }, scene)
+      startTouch1Marker.material = touch1MarkerMaterial
+      startTouch1Marker.visibility = 0.4
+      startTouch1Marker.layerMask = 0x20000000
+
+      const startTouch2Marker = MeshBuilder.CreateSphere('startTouch2marker', { diameter }, scene)
+      startTouch2Marker.material = touch2MarkerMaterial
+      startTouch2Marker.visibility = 0.4
+      startTouch2Marker.layerMask = 0x20000000
 
       const mapValue = (value: number, x1: number, y1: number, x2: number, y2: number) => ((value - x1) * (y2 - x2)) / (y1 - x1) + x2
       const renderWidth = engine.getRenderWidth()
@@ -248,6 +265,18 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
           touch2Marker.position.y = y
           touch2Marker.position.z = 0
 
+          x = mapValue(this._startPointer0.x, 0, renderWidth, -rw, rw)
+          y = mapValue(this._startPointer0.y, 0, renderHeight, rh, -rh)
+          startTouch1Marker.position.x = x
+          startTouch1Marker.position.y = y
+          startTouch1Marker.position.z = 0
+
+          x = mapValue(this._startPointer1.x, 0, renderWidth, -rw, rw)
+          y = mapValue(this._startPointer1.y, 0, renderHeight, rh, -rh)
+          startTouch2Marker.position.x = x
+          startTouch2Marker.position.y = y
+          startTouch2Marker.position.z = 0
+
           if (this._oldInfo.distance < 1) {
             touch2Marker.isVisible = false
             touch2Button.isVisible = false
@@ -281,22 +310,6 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
     }
 
     // DEBUG markers
-
-    const size = 1
-    const centerMarker = MeshBuilder.CreateBox('centerMarker', { size: 0.5 }, scene)
-    const centerMarkerMaterial = new StandardMaterial('centerMarkerMaterial', scene)
-    centerMarkerMaterial.emissiveColor = Color3.Green()
-    centerMarker.material = centerMarkerMaterial
-
-    const touch1Marker = MeshBuilder.CreateBox('touch1marker', { size }, scene)
-    const touch1MarkerMaterial = new StandardMaterial('touch1MarkerMaterial', scene)
-    touch1MarkerMaterial.emissiveColor = Color3.Red()
-    touch1Marker.material = touch1MarkerMaterial
-
-    const touch2Marker = MeshBuilder.CreateBox('touch2marker', { size }, scene)
-    const touch2MarkerMaterial = new StandardMaterial('touch2MarkerMaterial', scene)
-    touch2MarkerMaterial.emissiveColor = Color3.Blue()
-    touch2Marker.material = touch2MarkerMaterial
 
     let startPosition = Vector3.Zero()
     let startTarget = Vector3.Zero()
@@ -361,6 +374,7 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
 
     manager.on('rotateend', e => {
       // console.log('rotateend')
+
       setTimeout(() => {
         isRotating = false
         isBetaPanning = false
@@ -368,7 +382,8 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
     })
 
     manager.on('rotatestart', e => {
-      if (isRotating || isBetaPanning) {
+      manager.get('pan').set({ enable: false })
+      if (isRotating || isBetaPanning || isPanning) {
         return
       }
       // console.log('rotatestart')
@@ -474,32 +489,32 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
         this.camera.beta = startBeta + info.deltaCenter.y / 400
       }
 
-      console.log(
-        'startAlpha',
-        (startAlpha * 180) / Math.PI,
-        'startInfo.angle',
-        (this._startInfo.angle * 180) / Math.PI,
-        'angle',
-        (info.angle * 180) / Math.PI,
-        'addAngle',
-        (addAngle * 180) / Math.PI,
-        'deltaAngle',
-        (deltaAngle * 180) / Math.PI,
-        'info.deltaCenter.x',
-        info.deltaCenter.x,
-        'info.deltaCenter.y',
-        info.deltaCenter.y,
-        'p0',
-        p0.x,
-        p0.y,
-        'p1',
-        p1.x,
-        p1.y,
-        'firstTouchLow',
-        firstTouchLow,
-        'distance',
-        info.distance
-      )
+      // console.log(
+      //   'startAlpha',
+      //   (startAlpha * 180) / Math.PI,
+      //   'startInfo.angle',
+      //   (this._startInfo.angle * 180) / Math.PI,
+      //   'angle',
+      //   (info.angle * 180) / Math.PI,
+      //   'addAngle',
+      //   (addAngle * 180) / Math.PI,
+      //   'deltaAngle',
+      //   (deltaAngle * 180) / Math.PI,
+      //   'info.deltaCenter.x',
+      //   info.deltaCenter.x,
+      //   'info.deltaCenter.y',
+      //   info.deltaCenter.y,
+      //   'p0',
+      //   p0.x,
+      //   p0.y,
+      //   'p1',
+      //   p1.x,
+      //   p1.y,
+      //   'firstTouchLow',
+      //   firstTouchLow,
+      //   'distance',
+      //   info.distance
+      // )
 
       this._oldPointer0.x = e.pointers[0].clientX
       this._oldPointer0.y = e.pointers[0].clientY
@@ -606,9 +621,7 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
    * Get the friendly name associated with the input class.
    * @returns the input friendly name
    */
-  public getSimpleName(): string {
-    return 'HammerJS'
-  }
+  public getSimpleName(): string {}
 
   public checkInputs() {
     // this.camera.inertialRadiusOffset = -0.1
