@@ -12,7 +12,6 @@
   },
   "dependencies": {
     "@babylonjs/core": "^5.0.0-alpha.60",
-    "@babylonjs/gui": "^5.0.0-alpha.60",
     "@babylonjs/inspector": "^5.0.0-alpha.60",
     "@babylonjs/loaders": "^5.0.0-alpha.60",
     "@babylonjs/materials": "^5.0.0-alpha.60",
