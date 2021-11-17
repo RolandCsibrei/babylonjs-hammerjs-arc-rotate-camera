@@ -112,7 +112,7 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
     public zPanningRatioSingleTouch = 0.06,
     public xPanningRatio = 0.06,
     public zPanningRatio = 0.06,
-    public zoomRatio = 0.06,
+    public zoomRatio = 0.14,
     public alphaRotationRation = 0.06,
     public betaRotationRation = 0.002,
 
