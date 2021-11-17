@@ -106,17 +106,18 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
     /**
      * Define if touch is enabled in the mouse input
      */
-    public rotationSensibilityAlpha = 80,
-    public rotationSensibilityBeta = 400,
-    public panningSensibility = 400,
-    public zoomSensibility = 80,
-    public xPanningRatio = 2 / 60,
-    public zPanningRatio = 4 / 60,
-    public xPanningTreshold = 40,
-    public yPanningTreshold = 40,
-    public rotationTreshold = 10,
-    public zoomLowerTreshold = 0.85,
-    public zoomUpperTreshold = 1.2,
+    public panTresholdInPixels = 40,
+    public rotateTresholdInPixels = 0,
+    public xPanningRatioSingleTouch = 0.03,
+    public zPanningRatioSingleTouch = 0.06,
+    public xPanningRatio = 0.06,
+    public zPanningRatio = 0.06,
+    public zoomRatio = 0.06,
+    public alphaRotationRation = 0.06,
+    public betaRotationRation = 0.002,
+
+    public singleTouchDisabledPeriodAfterDoubleTouch = 300, // ms
+
     public tiltTouchDistanceTresholdInPixelsX = 50,
     public tiltTouchDistanceTresholdInPixelsY = 70
   ) {
@@ -192,8 +193,8 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
     const element = <EventTarget>engine.getInputElement()
     const manager = new Hammer.Manager(element)
 
-    const rotate = new Hammer.Rotate({ threshold: 0 })
-    const pan = new Hammer.Pan({ threshold: 0 })
+    const rotate = new Hammer.Rotate({ threshold: this.rotateTresholdInPixels })
+    const pan = new Hammer.Pan({ threshold: this.panTresholdInPixels })
 
     manager.add(rotate)
     manager.add(pan)
@@ -244,7 +245,7 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
 
       const dx = -(this._startCenterX - e.pointers[0].clientX)
       const dy = this._startCenterY - e.pointers[0].clientY
-      panMove(dx * this.xPanningRatio, dy * this.zPanningRatio)
+      panMove(dx * this.xPanningRatioSingleTouch, dy * this.zPanningRatioSingleTouch)
 
       this._oldPointer0.x = e.pointers[0].clientX
       this._oldPointer0.y = e.pointers[0].clientY
@@ -263,16 +264,15 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
     manager.on('rotateend', e => {
       console.log('rotateend')
 
+      // manager.get('pan').set({ enable: true })
       setTimeout(() => {
-        manager.get('pan').set({ enable: true })
-
         this._isRotating = false
         this._isTilting = false
-      }, 500)
+      }, this.singleTouchDisabledPeriodAfterDoubleTouch)
     })
 
     manager.on('rotatestart', e => {
-      manager.get('pan').set({ enable: false })
+      // manager.get('pan').set({ enable: false })
       // if (isRotating || isBetaPanning || isPanning) {
       //   return
       // }
@@ -338,11 +338,11 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
       const info = getCenterAngleDistance(this._p0, this._p1)
 
       if (!this._isTilting) {
-        panMove(info.deltaCenter.x / 20, info.deltaCenter.y / 20)
-        this.camera.radius = this._startRadius + info.deltaDistance / 10
+        panMove(info.deltaCenter.x * this.xPanningRatio, info.deltaCenter.y * this.zPanningRatio)
+        this.camera.radius = this._startRadius + info.deltaDistance * this.zoomRatio
         this.camera.alpha = this._startAlpha + info.deltaAngle
       } else {
-        this.camera.beta = this._startBeta + info.deltaCenter.y / 400
+        this.camera.beta = this._startBeta + info.deltaCenter.y * this.betaRotationRation
       }
 
       this._oldPointer0.x = e.pointers[0].clientX
