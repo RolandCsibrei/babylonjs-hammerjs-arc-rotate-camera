@@ -125,6 +125,7 @@ export class HammerJsInputTestScene extends BaseScene {
     // add hammer js input
     const hammerJsInput = new ArcRotateCameraHammerJsInput()
     camera.inputs.add(hammerJsInput)
+    hammerJsInput.setDebugMode(true)
 
     camera.attachControl(this._canvas, true)
 
