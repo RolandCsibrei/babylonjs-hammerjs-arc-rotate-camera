@@ -5,7 +5,7 @@
   "productName": "BabylonJS HammerJS Input demo",
   "author": "roland@babylonjs.xyz",
   "license": "Creative Commons Attribution-ShareAlike 3.0",
-  "private": true,
+  "private": false,
   "scripts": {
     "lint": "eslint --ext .js,.ts,.vue ./",
     "test": "echo \"No test specified\" && exit 0"
