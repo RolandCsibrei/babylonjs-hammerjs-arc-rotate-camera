@@ -117,7 +117,7 @@ export class HammerJsInputTestScene extends BaseScene {
     const cameraParent = new TransformNode('cameraParent', this._scene)
     this._cameraParent = cameraParent
 
-    const camera = new ArcRotateCamera('camera', 2, 1, 60, new Vector3(0, 0, 0), this._scene)
+    const camera = new ArcRotateCamera('camera', 0, 1, 60, new Vector3(0, 0, 0), this._scene)
     camera.parent = cameraParent
 
     // remove mouse input
@@ -125,7 +125,7 @@ export class HammerJsInputTestScene extends BaseScene {
     // add hammer js input
     const hammerJsInput = new ArcRotateCameraHammerJsInput()
     camera.inputs.add(hammerJsInput)
-    hammerJsInput.setDebugMode(true)
+    hammerJsInput.setDebugMode(true, false)
 
     camera.attachControl(this._canvas, true)
 

@@ -2,6 +2,7 @@
  * Google Earth like touch camera controls
  */
 
+// TODO: remove camera dependecy & make observable
 // TODO: make configurable
 // TODO: tide up properties
 // TODO: DRY
@@ -26,6 +27,7 @@ import {
   MeshBuilder,
   Nullable,
   Observer,
+  Scalar,
   Scene,
   StandardMaterial,
   Vector2,
@@ -41,6 +43,7 @@ interface DoubleTouchInfo {
   deltaAngle: number
   distance: number
   deltaDistance: number
+  quadrant: number
 }
 
 interface TouchInfo {
@@ -67,6 +70,8 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
   private _p1?: TouchInfo
   private _info?: DoubleTouchInfo
 
+  private _shiftAngle = 0
+
   private _startPointer0: TouchInfo
   private _oldPointer0: TouchInfo
 
@@ -91,12 +96,25 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
   private _isPanning = false
   private _isRotating = false
 
+  private _targetAlpha = 0
+  private _targetBeta = 0
+  private _targetRadius = 0
+  private _targetPosition = new Vector3()
+  private _targetTarget = new Vector3()
+
   private _firstTouchLow = false
 
+  private _debugToConsole = false
   private _debugCamera?: ArcRotateCamera
   private _debugObserver: Nullable<Observer<Scene>> = null
   private _gui?: AdvancedDynamicTexture
 
+  private _panRequired = false
+  private _zoomRequired = false
+  private _tiltRequired = false
+  private _rotationRequired = false
+
+  // private _quadrantHistory: number[] = []
   /**
    * Manage the mouse inputs to control the movement of a free camera.
    * @see https://doc.babylonjs.com/how_to/customizing_camera_inputs
@@ -108,18 +126,31 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
      */
     public panTresholdInPixels = 40,
     public rotateTresholdInPixels = 0,
-    public xPanningRatioSingleTouch = 0.03,
+    public xPanningRatioSingleTouch = 0.06,
     public zPanningRatioSingleTouch = 0.06,
     public xPanningRatio = 0.06,
     public zPanningRatio = 0.06,
     public zoomRatio = 0.14,
-    public alphaRotationRation = 0.06,
-    public betaRotationRation = 0.002,
+    public rotationRatio = 0.06,
+    public tiltRatio = 0.002,
+
+    public rotateLerpFactor = 0.05,
+    public tiltLerpFactor = 0.05,
+    public zoomLerpFactor = 0.1,
+    public panLerpFactor = 0.07,
+
+    public distancePanInfluence = 1.0,
+    public distanceRotationInfluence = 1.0,
+    public distanceZoomInfluence = 1.0,
 
     public singleTouchDisabledPeriodAfterDoubleTouch = 300, // ms
 
     public tiltTouchDistanceTresholdInPixelsX = 50,
-    public tiltTouchDistanceTresholdInPixelsY = 70
+    public tiltTouchDistanceTresholdInPixelsY = 70,
+    public disablePan = false,
+    public disableTilt = true,
+    public disableZoom = false,
+    public disableRotation = false
   ) {
     this._oldPointer0 = ArcRotateCameraHammerJsInput._InitPointerInfo()
     this._startPointer0 = ArcRotateCameraHammerJsInput._InitPointerInfo()
@@ -133,7 +164,8 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
       angle: 0,
       deltaAngle: 0,
       distance: 0,
-      deltaDistance: 0
+      deltaDistance: 0,
+      quadrant: 0
     }
 
     this._startInfo = {
@@ -142,7 +174,8 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
       angle: 0,
       deltaAngle: 0,
       distance: 0,
-      deltaDistance: 0
+      deltaDistance: 0,
+      quadrant: 0
     }
   }
 
@@ -196,8 +229,32 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
     const rotate = new Hammer.Rotate({ threshold: this.rotateTresholdInPixels })
     const pan = new Hammer.Pan({ threshold: this.panTresholdInPixels })
 
-    manager.add(rotate)
     manager.add(pan)
+    manager.add(rotate)
+
+    let oldPointersLength = 0
+    manager.on('hammer.input', (e: HammerInput) => {
+      // console.log(e.pointers.length)
+      if (e.pointers.length === 2) {
+        manager.get('pan').set({ enable: false })
+        this._isRotating = true
+      }
+      if (e.pointers.length === 0 && oldPointersLength === 2) {
+        setTimeout(() => {
+          manager.get('pan').set({ enable: true })
+          this._isRotating = false
+          this._isTilting = false
+        }, this.singleTouchDisabledPeriodAfterDoubleTouch)
+      }
+      if (e.pointers.length === 1 && e.isFinal) {
+        setTimeout(() => {
+          manager.get('pan').set({ enable: true })
+          this._isRotating = false
+          this._isTilting = false
+        }, this.singleTouchDisabledPeriodAfterDoubleTouch)
+      }
+      oldPointersLength = e.pointers.length
+    })
 
     this._startPosition = Vector3.Zero()
     this._startTarget = Vector3.Zero()
@@ -215,214 +272,345 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
     this._isRotating = false
 
     this._firstTouchLow = false
+    //
+    this._targetAlpha = this.camera.alpha
+    this._targetBeta = this.camera.beta
+    this._targetRadius = this.camera.radius
+    this._targetPosition = this.camera.position.clone()
+    this._targetTarget = this.camera.target.clone()
+    //
+    this.camera.getScene().onBeforeRenderObservable.add(() => {
+      if (this._panRequired) {
+        this.camera.position = Vector3.Lerp(this.camera.position, this._targetPosition, this.panLerpFactor)
+        this.camera.target = Vector3.Lerp(this.camera.target, this._targetTarget, this.panLerpFactor)
+      }
+      if (this._rotationRequired) {
+        this.camera.target = Vector3.Lerp(this.camera.target, this._targetTarget, this.panLerpFactor)
+        // this.camera.beta = Scalar.Lerp(this.camera.beta, this._targetBeta, this.tiltLerpFactor)
+        this.camera.alpha = Scalar.Lerp(this.camera.alpha, this._targetAlpha, this.rotateLerpFactor)
+      }
+      this.camera.radius = Scalar.Lerp(this.camera.radius, this._targetRadius, this.zoomLerpFactor)
+
+      // this.camera.target = this._targetTarget
+      // this.camera.alpha = this._targetAlpha
+      this.camera.beta = this._targetBeta
+      // this.camera.radius = this._targetRadius
+    })
 
     //
 
-    manager.on('panstart', e => {
-      if (this._isRotating || this._isTilting) {
-        return
-      }
+    manager.on('panstart', e => this._panStart(e))
+    manager.on('pan', e => this._pan(e))
+    manager.on('panend', e => this._panEnd(e))
 
-      console.log('panstart')
-      this._setPointersInfo(e.pointers[0], e.pointers[0])
+    manager.on('rotatestart', e => this._rotateStart(e))
+    manager.on('rotate', e => this._rotate(e))
+    manager.on('rotateend', e => this._rotateEnd(e))
+  }
 
-      const info = getCenterAngleDistance(this._startPointer0, this._startPointer1)
-      this._oldInfo = { ...info }
-      this._startInfo = { ...info }
+  private _panMove(dx: number, dy: number) {
+    // rotate the position according to camera.alpha
+    const alpha = this._targetAlpha - Math.PI / 2
+    const c = Math.cos(alpha)
+    const s = Math.sin(alpha)
+    const x1 = dx
+    const y1 = dy
+    const x2 = c * x1 - s * y1
+    const y2 = s * x1 + c * y1
 
-      this._isPanning = true
-      this._startCenterX = e.pointers[0].clientX
-      this._startCenterY = e.pointers[0].clientY
+    this._targetTarget.x = this._startTarget.x + x2
+    this._targetTarget.z = this._startTarget.z + y2
 
-      this._startPosition = this.camera.position.clone()
-      this._startTarget = this.camera.target.clone()
-    })
+    this._targetPosition.x = this._startPosition.x + x2
+    this._targetPosition.z = this._startPosition.z + y2
 
-    manager.on('pan', e => {
-      if (this._isRotating || this._isTilting) {
-        return
-      }
+    // const rotationCenter = this.camera.target.clone()
 
-      const dx = -(this._startCenterX - e.pointers[0].clientX)
-      const dy = this._startCenterY - e.pointers[0].clientY
-      panMove(dx * this.xPanningRatioSingleTouch, dy * this.zPanningRatioSingleTouch)
+    // console.log(targetAlpha)
+    // this._targetPosition.rotateByQuaternionAroundPointToRef(
+    //   Quaternion.RotationAlphaBetaGamma(targetAlpha, targetBeta, 0),
+    //   rotationCenter,
+    //   this._targetPosition
+    // )
+  }
 
-      this._oldPointer0.x = e.pointers[0].clientX
-      this._oldPointer0.y = e.pointers[0].clientY
-      this._oldPointer0.deltaCenter.copyFromFloats(dx, dy)
-
-      this._oldPointer1.x = e.pointers[0].clientX
-      this._oldPointer1.y = e.pointers[0].clientY
-      this._oldPointer0.deltaCenter.copyFromFloats(dx, dy)
-    })
-
-    manager.on('panend', e => {
-      console.log('panend')
-      this._isPanning = false
-    })
-
-    manager.on('rotateend', e => {
-      console.log('rotateend')
-
-      // manager.get('pan').set({ enable: true })
-      setTimeout(() => {
-        this._isRotating = false
-        this._isTilting = false
-      }, this.singleTouchDisabledPeriodAfterDoubleTouch)
-    })
-
-    manager.on('rotatestart', e => {
-      // manager.get('pan').set({ enable: false })
-      // if (isRotating || isBetaPanning || isPanning) {
-      //   return
-      // }
-      console.log('rotatestart')
-
-      this._isRotating = true
-
-      const sy0 = e.pointers[0].clientY
-      const sy1 = e.pointers[1].clientY
-      if (sy0 > sy1) {
-        this._firstTouchLow = true
-      } else {
-        this._firstTouchLow = false
-      }
-
-      this._setPointersInfo(e.pointers[0], e.pointers[1])
-
-      this._oldInfo = {
-        center: new Vector2(),
-        deltaCenter: new Vector2(),
-        angle: 0,
-        deltaAngle: 0,
-        distance: 0,
-        deltaDistance: 0
-      }
-
-      this._startInfo = {
-        center: new Vector2(),
-        deltaCenter: new Vector2(),
-        angle: 0,
-        deltaAngle: 0,
-        distance: 0,
-        deltaDistance: 0
-      }
-
-      //
-
-      if (
-        Math.abs(this._startPointer0.y - this._startPointer1.y) < this.tiltTouchDistanceTresholdInPixelsY &&
-        Math.abs(this._startPointer0.x - this._startPointer1.x) > this.tiltTouchDistanceTresholdInPixelsX
-      ) {
-        this._isTilting = true
-      } else {
-        this._isTilting = false
-      }
-      this._startPosition = this.camera.position.clone()
-      this._startTarget = this.camera.target.clone()
-
-      this._info = getCenterAngleDistance(this._startPointer0, this._startPointer1)
-
-      this._startInfo = { ...this._info }
-
-      //
-
-      this._startAlpha = this.camera.alpha
-      this._startBeta = this.camera.beta
-      this._startRadius = this.camera.radius
-    })
-
-    manager.on('rotate', e => {
-      this._p0 = processPointer(e.pointers[0], this._oldPointer0, this._startPointer0)
-      this._p1 = processPointer(e.pointers[1], this._oldPointer1, this._startPointer1)
-      const info = getCenterAngleDistance(this._p0, this._p1)
-
-      if (!this._isTilting) {
-        panMove(info.deltaCenter.x * this.xPanningRatio, info.deltaCenter.y * this.zPanningRatio)
-        this.camera.radius = this._startRadius + info.deltaDistance * this.zoomRatio
-        this.camera.alpha = this._startAlpha + info.deltaAngle
-      } else {
-        this.camera.beta = this._startBeta + info.deltaCenter.y * this.betaRotationRation
-      }
-
-      this._oldPointer0.x = e.pointers[0].clientX
-      this._oldPointer0.y = e.pointers[0].clientY
-      this._oldPointer0.deltaCenter.copyFromFloats(this._oldPointer0.x - this._startPointer0.x, this._oldPointer0.y - this._startPointer0.y)
-
-      this._oldPointer1.x = e.pointers[1].clientX
-      this._oldPointer1.y = e.pointers[1].clientY
-      this._oldPointer1.deltaCenter.copyFromFloats(this._oldPointer1.x - this._startPointer1.x, this._oldPointer1.y - this._startPointer1.y)
-
-      this._oldInfo = { ...info }
-    })
-
-    const panMove = (dx: number, dy: number) => {
-      // rotate the position according to camera.alpha
-      const alpha = this.camera.alpha - Math.PI / 2
-      const c = Math.cos(alpha)
-      const s = Math.sin(alpha)
-      const x1 = dx
-      const y1 = dy
-      const x2 = c * x1 - s * y1
-      const y2 = s * x1 + c * y1
-
-      this.camera.position.x = this._startPosition.x + x2
-      this.camera.position.z = this._startPosition.z + y2
-
-      this.camera.target.x = this._startTarget.x + x2
-      this.camera.target.z = this._startTarget.z + y2
+  private _processPointer(e: PointerEvent, oldPointer: TouchInfo, startPointer: TouchInfo) {
+    const dx = startPointer.x - e.clientX
+    const dy = startPointer.y - e.clientY
+    const distance = Math.sqrt(dx * dx + dy * dy)
+    const deltaDistance = this._startInfo.distance - distance
+    const touchInfo: TouchInfo = {
+      x: e.clientX,
+      y: e.clientY,
+      deltaCenter: new Vector2(dx, dy),
+      distance,
+      deltaDistance
     }
 
-    const processPointer = (e: PointerEvent, oldPointer: TouchInfo, startPointer: TouchInfo) => {
-      const dx = startPointer.x - e.clientX
-      const dy = startPointer.y - e.clientY
-      const distance = Math.sqrt(dx * dx + dy * dy)
-      const deltaDistance = this._startInfo.distance - distance
-      const touchInfo: TouchInfo = {
-        x: e.clientX,
-        y: e.clientY,
-        deltaCenter: new Vector2(dx, dy),
-        distance,
-        deltaDistance
-      }
+    return touchInfo
+  }
 
-      return touchInfo
+  private _getCenterAngleDistance(p0: TouchInfo, p1: TouchInfo): DoubleTouchInfo {
+    const maxX = Math.max(p0.x, p1.x)
+    const maxY = Math.max(p0.y, p1.y)
+    const minX = Math.min(p0.x, p1.x)
+    const minY = Math.min(p0.y, p1.y)
+
+    const touchWidth = p0.x - p1.x
+    const touchHeight = p0.y - p1.y
+
+    const center = new Vector2((maxX - minX) / 2 + minX, (maxY - minY) / 2 + minY)
+    const deltaCenter = new Vector2(center.x - this._startInfo.center.x, this._startInfo.center.y - center.y)
+
+    let angle = Math.atan2(touchHeight, touchWidth) // range (-PI, PI]
+
+    if (angle < 0) {
+      angle = Math.PI * 2 + angle // range [0, 2PI)
     }
 
-    const getCenterAngleDistance = (p0: TouchInfo, p1: TouchInfo): DoubleTouchInfo => {
-      const maxX = Math.max(p0.x, p1.x)
-      const maxY = Math.max(p0.y, p1.y)
-      const minX = Math.min(p0.x, p1.x)
-      const minY = Math.min(p0.y, p1.y)
+    angle -= Math.PI / 2 //shift by 90deg
+    if (angle < 0) angle += 2 * Math.PI
+    if (angle < 0) angle += 2 * Math.PI
 
-      const touchWidth = p0.x - p1.x
-      const touchHeight = p0.y - p1.y
+    // TODO: calc this
+    const quadrant =
+      angle >= 0 && angle < Math.PI / 2
+        ? 1
+        : angle >= Math.PI / 2 && angle < Math.PI
+        ? 2
+        : angle >= Math.PI && angle < Math.PI * 1.5
+        ? 3
+        : angle >= Math.PI * 1.5 && angle < Math.PI * 2
+        ? 4
+        : 0
 
-      const center = new Vector2((maxX - minX) / 2 + minX, (maxY - minY) / 2 + minY)
-      const deltaCenter = new Vector2(center.x - this._startInfo.center.x, this._startInfo.center.y - center.y)
-
-      let angle = Math.atan2(touchHeight, touchWidth) // range (-PI, PI]
-      if (angle < 0) {
-        angle = Math.PI * 2 + angle // range [0, 2PI)
+    // if (this._oldInfo.quadrant !== quadrant) {
+    //   console.log(this._oldInfo.quadrant, '=>', quadrant)
+    //   if (this._quadrantHistory.length > 4) {
+    //     this._quadrantHistory.shift()
+    //   }
+    //   this._quadrantHistory.push(quadrant)
+    // }
+    if (this._firstTouchLow) {
+      if ((this._oldInfo.quadrant === 0 || this._oldInfo.quadrant === 1) && quadrant === 4) {
+        if (this._startInfo.quadrant === 1) {
+          this._shiftAngle = Math.PI * 2
+        }
+        if (this._startInfo.quadrant === 4) {
+          this._shiftAngle = 0
+        }
       }
-      angle -= Math.PI / 2 //shift by 90deg
-      if (angle < 0) angle += 2 * Math.PI
-      if (angle < 0) angle += 2 * Math.PI
-      angle = Math.abs(Math.PI * 2 - angle) //invert rotation
-
-      const deltaAngle = this._startInfo.angle - angle
-      const distance = Math.sqrt(touchWidth * touchWidth + touchHeight * touchHeight)
-      const deltaDistance = this._startInfo.distance - distance
-
-      return {
-        center,
-        deltaCenter,
-        angle,
-        deltaAngle,
-        distance,
-        deltaDistance
+      if ((this._oldInfo.quadrant === 0 || this._oldInfo.quadrant === 4) && quadrant === 1) {
+        if (this._startInfo.quadrant === 1) {
+          this._shiftAngle = 0
+        }
+        if (this._startInfo.quadrant === 4) {
+          this._shiftAngle = -Math.PI * 2
+        }
+      }
+    } else {
+      if ((this._oldInfo.quadrant === 0 || this._oldInfo.quadrant === 1) && quadrant === 4) {
+        this._shiftAngle = Math.PI * 2
+      }
+      if ((this._oldInfo.quadrant === 0 || this._oldInfo.quadrant === 4) && quadrant === 1) {
+        this._shiftAngle = 0
       }
     }
+
+    const deltaAngle = this._startInfo.angle - angle + this._shiftAngle
+    const distance = Math.sqrt(touchWidth * touchWidth + touchHeight * touchHeight)
+    const deltaDistance = this._startInfo.distance - distance
+
+    return {
+      center,
+      deltaCenter,
+      angle,
+      deltaAngle,
+      distance,
+      deltaDistance,
+      quadrant
+    }
+  }
+
+  private _getDistanceInfluenceRatio(influence: number) {
+    const ratio = (this._startRadius - this._targetRadius) * influence
+    return ratio
+  }
+
+  private _panStart(e: HammerInput) {
+    if (this.disablePan) {
+      return
+    }
+
+    console.log('panstart')
+    if (this._isRotating || this._isTilting) {
+      return
+    }
+
+    this._setPointersInfo(e.pointers[0], e.pointers[0])
+
+    const info = this._getCenterAngleDistance(this._startPointer0, this._startPointer1)
+    this._oldInfo = { ...info }
+    this._startInfo = { ...info }
+
+    this._isPanning = true
+    this._startCenterX = e.pointers[0].clientX
+    this._startCenterY = e.pointers[0].clientY
+
+    this._startPosition = this.camera.position.clone()
+    this._startTarget = this.camera.target.clone()
+  }
+
+  private _pan(e: HammerInput) {
+    if (this.disablePan) {
+      return
+    }
+
+    console.log('pan')
+    if (this._isRotating || this._isTilting) {
+      return
+    }
+
+    const dx = -(this._startCenterX - e.pointers[0].clientX)
+    const dy = this._startCenterY - e.pointers[0].clientY
+    this._panMove(dx * this.xPanningRatioSingleTouch, dy * this.zPanningRatioSingleTouch)
+
+    // this.camera.rebuildAnglesAndRadius()
+
+    this._panRequired = true
+    this._rotationRequired = false
+
+    this._oldPointer0.x = e.pointers[0].clientX
+    this._oldPointer0.y = e.pointers[0].clientY
+    this._oldPointer0.deltaCenter.copyFromFloats(dx, dy)
+
+    this._oldPointer1.x = e.pointers[0].clientX
+    this._oldPointer1.y = e.pointers[0].clientY
+    this._oldPointer0.deltaCenter.copyFromFloats(dx, dy)
+  }
+
+  private _panEnd(e: HammerInput) {
+    if (this.disablePan) {
+      return
+    }
+
+    console.log('panend')
+    this._isPanning = false
+    this._isRotating = false
+  }
+
+  private _rotateStart(e: HammerInput) {
+    // if (isRotating || isBetaPanning || isPanning) {
+    //   return
+    // }
+    console.log('rotatestart')
+
+    // this._isRotating = true
+
+    const sy0 = e.pointers[0].clientY
+    const sy1 = e.pointers[1].clientY
+    if (sy0 > sy1) {
+      this._firstTouchLow = true
+    } else {
+      this._firstTouchLow = false
+    }
+
+    this._setPointersInfo(e.pointers[0], e.pointers[1])
+
+    this._oldInfo = {
+      center: new Vector2(),
+      deltaCenter: new Vector2(),
+      angle: 0,
+      deltaAngle: 0,
+      distance: 0,
+      deltaDistance: 0,
+      quadrant: 0
+    }
+
+    this._startInfo = {
+      center: new Vector2(),
+      deltaCenter: new Vector2(),
+      angle: 0,
+      deltaAngle: 0,
+      distance: 0,
+      deltaDistance: 0,
+      quadrant: 0
+    }
+
+    //
+
+    if (
+      Math.abs(this._startPointer0.y - this._startPointer1.y) < this.tiltTouchDistanceTresholdInPixelsY &&
+      Math.abs(this._startPointer0.x - this._startPointer1.x) > this.tiltTouchDistanceTresholdInPixelsX
+    ) {
+      this._isTilting = true
+    } else {
+      this._isTilting = false
+    }
+    this._startPosition = this.camera.position.clone()
+    this._startTarget = this.camera.target.clone()
+
+    this._info = this._getCenterAngleDistance(this._startPointer0, this._startPointer1)
+
+    this._startInfo = { ...this._info }
+
+    //
+
+    this._startAlpha = this.camera.alpha
+    this._startBeta = this.camera.beta
+    this._startRadius = this.camera.radius
+  }
+
+  private _rotate(e: HammerInput) {
+    this._panRequired = false
+    this._rotationRequired = true
+
+    this._p0 = this._processPointer(e.pointers[0], this._oldPointer0, this._startPointer0)
+    this._p1 = this._processPointer(e.pointers[1], this._oldPointer1, this._startPointer1)
+    const info = this._getCenterAngleDistance(this._p0, this._p1)
+
+    if (this._debugToConsole) {
+      this._logInfoToConsole()
+    }
+
+    if (!this._isTilting) {
+      if (!this.disablePan) {
+        this._panMove(info.deltaCenter.x * this.xPanningRatio, info.deltaCenter.y * this.zPanningRatio)
+      }
+      if (!this.disableZoom) {
+        this._targetRadius = this._startRadius + info.deltaDistance * this.zoomRatio
+      }
+      if (Math.abs(this._targetAlpha - (this._startAlpha - info.deltaAngle)) > Math.PI) {
+        // debugger
+      }
+      if (!this.disableRotation) {
+        this._targetAlpha = this._startAlpha - info.deltaAngle
+      }
+    } else {
+      if (!this.disableTilt) {
+        this._targetBeta = this._startBeta + info.deltaCenter.y * this.tiltRatio
+      }
+    }
+
+    this._oldPointer0.x = e.pointers[0].clientX
+    this._oldPointer0.y = e.pointers[0].clientY
+    this._oldPointer0.deltaCenter.copyFromFloats(this._oldPointer0.x - this._startPointer0.x, this._oldPointer0.y - this._startPointer0.y)
+
+    this._oldPointer1.x = e.pointers[1].clientX
+    this._oldPointer1.y = e.pointers[1].clientY
+    this._oldPointer1.deltaCenter.copyFromFloats(this._oldPointer1.x - this._startPointer1.x, this._oldPointer1.y - this._startPointer1.y)
+
+    this._oldInfo = { ...info }
+  }
+  private _rotateEnd(e: HammerInput) {
+    console.log('rotateend')
+
+    this._shiftAngle = 0
+
+    // setTimeout(() => {
+    //   this._isRotating = false
+    //   this._isTilting = false
+    // }, this.singleTouchDisabledPeriodAfterDoubleTouch)
   }
 
   /**
@@ -467,14 +655,34 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
     //
   }
 
+  public getInfo() {
+    const info = {
+      targetPosition: this._targetPosition,
+      targetTarget: this._targetTarget,
+      targetAlpha: this._targetAlpha,
+      targetBeta: this._targetBeta,
+      targetRadius: this._targetRadius,
+      startInfo: this._startInfo,
+      oldInfo: this._oldInfo,
+      info: this._info,
+      startAlpha: this._startAlpha,
+      p0: this._p0,
+      p1: this._p1,
+      firstTouchLow: this._firstTouchLow
+    }
+    return info
+  }
+
   // DEBUG STUFF - can be left out
 
-  public setDebugMode(enable: boolean) {
-    if (enable) {
+  public setDebugMode(enableGadgets: boolean, debugToConsole = true) {
+    if (enableGadgets) {
       this._createDebug()
     } else {
       this._disposeDebug()
     }
+
+    this._debugToConsole = debugToConsole
   }
 
   private _createDebug() {
@@ -522,7 +730,7 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
       centerMarker.material = centerMarkerMaterial
       centerMarker.layerMask = 0x20000000
       centerMarker.visibility = 0.4
-      const centerButton = this._addDebugButton(0, adt, 3)
+      const centerButton = this._addDebugButton(0, adt, 5)
 
       const touch1Marker = MeshBuilder.CreateSphere('touch1marker', { diameter }, scene)
       const touch1MarkerMaterial = new StandardMaterial('touch1MarkerMaterial', scene)
@@ -561,61 +769,15 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
       const mapValue = (value: number, x1: number, y1: number, x2: number, y2: number) => ((value - x1) * (y2 - x2)) / (y1 - x1) + x2
       const renderWidth = engine.getRenderWidth()
       const renderHeight = engine.getRenderHeight()
-      // let angleMarker: Mesh | null = null
-
-      // const angleMarkerMaterial = new StandardMaterial('angleMarkerMaterial', scene)
-      // angleMarkerMaterial.emissiveColor = Color3.Yellow()
-      // angleMarkerMaterial.alpha = 0.1
 
       this._debugObserver = scene.onBeforeRenderObservable.add(() => {
         if (this._debugCamera) {
-          if (this._info && this._p0 && this._p1) {
-            console.log(
-              'startAlpha',
-              (this._startAlpha * 180) / Math.PI,
-              'startInfo.angle',
-              (this._startInfo.angle * 180) / Math.PI,
-              'info.angle',
-              (this._info.angle * 180) / Math.PI,
-              'info.deltaAngle',
-              (this._info.deltaAngle * 180) / Math.PI,
-              'camera.alpha',
-              (this.camera.alpha * 180) / Math.PI,
-              'info.deltaCenter.x',
-              this._info.deltaCenter.x,
-              'info.deltaCenter.y',
-              this._info.deltaCenter.y,
-              'p0',
-              this._p0.x,
-              this._p0.y,
-              'p1',
-              this._p1.x,
-              this._p1.y,
-              'firstTouchLow',
-              this._firstTouchLow,
-              'distance',
-              this._info.distance
-            )
-          }
-
-          // DEBUG MARKERS
           const rw = 22
           const rh = 12
 
-          // if (angleMarker) {
-          //   angleMarker.dispose()
-          // }
-          // angleMarker = MeshBuilder.CreateDisc(
-          //   'angleMarker',
-          //   { radius: this._oldInfo.distance / 100, tessellation: 180, arc: (Math.PI * 2) / this._oldInfo.angle },
-          //   scene
-          // )
-          // angleMarker.position = centerMarker.position
-          // angleMarker.material = angleMarkerMaterial
-          // angleMarker.layerMask = 0x20000000
-
           if (touch1Button.textBlock) {
             touch1Button.textBlock.text = `${this._oldPointer0.x}, ${this._oldPointer0.y}\nΔ ${this._oldPointer0.deltaCenter.x}, ${this._oldPointer0.deltaCenter.y}`
+            // sbeta ${this._startBeta.toPrecision(3)}\ntbeta ${this._targetBeta.toPrecision(3)}\ncbeta ${this.camera.beta.toPrecision(3)}`
           }
           touch1Button.leftInPixels = this._oldPointer0.x - renderWidth / 2
           touch1Button.topInPixels = this._oldPointer0.y - renderHeight / 2 - 50
@@ -627,9 +789,15 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
           touch2Button.topInPixels = this._oldPointer1.y - renderHeight / 2 - 60
 
           if (centerButton.textBlock) {
-            centerButton.textBlock.text = `${this._oldInfo.center.x}, ${this._oldInfo.center.y}\nΔ rad ${this._oldInfo.deltaAngle.toPrecision(
-              4
-            )}\nrad ${this._oldInfo.angle.toPrecision(4)}`
+            // ${this._oldInfo.center.x}, ${this._oldInfo.center.y}\n
+            centerButton.textBlock.text = `srad ${this._startInfo.angle.toPrecision(3)}\nshift ${this._shiftAngle.toPrecision(
+              3
+            )}\nΔ rad ${this._oldInfo.deltaAngle.toPrecision(3)}\nrad ${this._oldInfo.angle.toPrecision(3)}\nalpha ${this.camera.alpha.toPrecision(3)}\nq ${
+              this._oldInfo.quadrant
+            }`
+            // centerButton.textBlock.text = `sbeta ${this._startBeta.toPrecision(3)}\ntbeta ${this._targetBeta.toPrecision(
+            //   3
+            // )}\ncbeta ${this.camera.beta.toPrecision(3)}`
           }
           centerButton.leftInPixels = this._oldInfo.center.x - renderWidth / 2
           centerButton.topInPixels = this._oldInfo.center.y - renderHeight / 2 - 60
@@ -737,6 +905,77 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
     adt.addControl(btn)
 
     return btn
+  }
+
+  private _logInfoToConsole() {
+    if (this._info) {
+      // console.table([
+      //   [
+      //     'sAlpha',
+      //     this._startAlpha,
+      //     (this._startAlpha * 180) / Math.PI,
+      //     'si.angle',
+      //     this._startInfo.angle,
+      //     (this._startInfo.angle * 180) / Math.PI,
+      //     'i.angle',
+      //     (this._info.angle * 180) / Math.PI,
+      //     'i.deltaAngle',
+      //     (this._info.deltaAngle * 180) / Math.PI,
+      //     'c.alpha',
+      //     (this.camera.alpha * 180) / Math.PI,
+      //     'i.dc.x',
+      //     this._info.deltaCenter.x,
+      //     'i.dc.y',
+      //     this._info.deltaCenter.y,
+      //     'p0',
+      //     this._p0.x,
+      //     this._p0.y,
+      //     'p1',
+      //     this._p1.x,
+      //     this._p1.y,
+      //     'firstTouchLow',
+      //     this._firstTouchLow,
+      //     'dist',
+      //     this._info.distance
+      //   ]
+      // ])
+      // console.table(debugData)
+
+      console.log(
+        'startAlpha',
+        this._startAlpha,
+        (this._startAlpha * 180) / Math.PI,
+        'startInfo.angle',
+        this._startInfo.angle,
+        (this._startInfo.angle * 180) / Math.PI,
+        'info.angle',
+        this._info.angle,
+        (this._info.angle * 180) / Math.PI,
+        'info.deltaAngle',
+        this._info.deltaAngle,
+        (this._info.deltaAngle * 180) / Math.PI,
+        'targetAlpha',
+        this._targetAlpha,
+        (this._targetAlpha * 180) / Math.PI,
+        'camera.alpha',
+        this.camera.alpha,
+        (this.camera.alpha * 180) / Math.PI,
+        'info.deltaCenter.x',
+        this._info.deltaCenter.x,
+        'info.deltaCenter.y',
+        this._info.deltaCenter.y,
+        'p0',
+        this._p0?.x,
+        this._p0?.y,
+        'p1',
+        this._p1?.x,
+        this._p1?.y,
+        'firstTouchLow',
+        this._firstTouchLow,
+        'distance',
+        this._info.distance
+      )
+    }
   }
 }
 
