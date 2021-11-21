@@ -12,20 +12,27 @@ import {
   Color3,
   MeshBuilder,
   StandardMaterial,
-  Texture
+  Texture,
+  FreeCamera,
+  AxesViewer,
+  Scalar,
+  SceneLoader
 } from '@babylonjs/core'
 import '@babylonjs/loaders'
 
 import { moveCameraTo } from '../utils/camera'
-import { ArcRotateCameraHammerJsInput } from '../utils/ArcRotateCameraHammerJsInput'
+import { HammerJsInput, HammerJsInputInfo } from '../utils/HammerJsInput'
 import { BaseScene } from './BaseScene'
 import { GridMaterial } from '@babylonjs/materials'
 
 export class HammerJsInputTestScene extends BaseScene {
   private _cameraParent!: TransformNode
 
-  private get _arcCamera() {
-    return <ArcRotateCamera>this._camera
+  private _target: Vector3 = new Vector3(0, 0, 0)
+  private _position: Vector3 = new Vector3(0, 0, 0)
+
+  private get _freeCamera() {
+    return <FreeCamera>this._camera
   }
 
   constructor(canvas: HTMLCanvasElement) {
@@ -38,9 +45,21 @@ export class HammerJsInputTestScene extends BaseScene {
     })
   }
 
+  private async _loadMeshes() {
+    const loaded = await SceneLoader.ImportMeshAsync('', '3dmodels/', 'pokemons.glb', this._scene)
+    // this._dudeMeshes = loaded.meshes
+    return loaded.meshes
+  }
+
   private async _createDemo() {
+    await this._loadMeshes()
     this._createObjects()
     await this._createSkyBox()
+
+    await this._scene.debugLayer.show({
+      embedMode: false,
+      overlay: true
+    })
   }
 
   private async _createSkyBox(): Promise<void> {
@@ -83,22 +102,36 @@ export class HammerJsInputTestScene extends BaseScene {
 
     const ground = MeshBuilder.CreateGround('ground', { height: 100, width: 100 }, this._scene)
     ground.material = groundMaterial
+    ground.visibility = 0.5
 
     //
     const boxMaterial = new StandardMaterial('boxMaterial', this._scene)
     boxMaterial.emissiveColor = Color3.Red().scale(0.4)
 
-    const box = MeshBuilder.CreateBox('box', { size: 4 }, this._scene)
-    box.parent = parent
+    const box = MeshBuilder.CreateBox('box', { size: 8 }, this._scene)
+    // box.parent = parent
+    box.position.x = -12
     box.material = boxMaterial
-    box.position.x = -8
+
+    const markerPosition = MeshBuilder.CreateCylinder('markerPosition', { diameterTop: 0, diameterBottom: 4, height: 20 }, this._scene)
+    markerPosition.rotation.x = Math.PI / 2
+    markerPosition.bakeCurrentTransformIntoVertices()
+    markerPosition.position = this._freeCamera.getFrontPosition(100)
+    markerPosition.lookAt(this._freeCamera.target)
+    markerPosition.position.y = 10
+    const markerTarget = MeshBuilder.CreateCylinder('markerTarget', { diameterTop: 0, diameterBottom: 4, height: 12 }, this._scene)
+    markerTarget.position = this._freeCamera.target.clone()
+    // box.parent = parent
 
     //
 
     const sphereMaterial = new StandardMaterial('sphereMaterial', this._scene)
     sphereMaterial.emissiveColor = Color3.Green().scale(0.4)
 
-    const sphere = Mesh.CreateSphere('box', 32, 4, this._scene)
+    markerPosition.material = boxMaterial
+    markerTarget.material = sphereMaterial
+
+    const sphere = Mesh.CreateSphere('sphere', 32, 6, this._scene)
     sphere.parent = parent
     sphere.material = sphereMaterial
 
@@ -110,43 +143,68 @@ export class HammerJsInputTestScene extends BaseScene {
     const kokki = MeshBuilder.CreateCylinder('kokki', { diameterTop: 0, diameterBottom: 4, height: 4 }, this._scene)
     kokki.parent = parent
     kokki.material = kokkiMaterial
-    kokki.position.x = 8
+    kokki.position.x = 10
+
+    //
+
+    new AxesViewer(this._scene, 10)
+  }
+
+  private _processInput(info: HammerJsInputInfo) {
+    console.log(info)
+    const markerPosition = this._scene.getMeshByName('markerPosition')
+    if (markerPosition) {
+      markerPosition.parent = info.positionTransform
+    }
+    const markerTarget = this._scene.getMeshByName('markerTarget')
+    if (markerTarget) {
+      markerTarget.parent = info.targetTransform
+      markerTarget.position.y = 10
+    }
+
+    const panLerpFactor = 0.0005
+    // this._freeCamera.parent = info.targetTransform
+    this._scene.onBeforeRenderObservable.add(() => {
+      // this._freeCamera.position = Vector3.Lerp(this._freeCamera.position, info.positionTransform.position, panLerpFactor)
+
+      this._freeCamera.position = info.positionTransform.position.clone()
+      this._freeCamera.lockedTarget = info.targetTransform.position.clone()
+
+      // if (this._panRequired) {
+      // this._freeCamera.target.x = info.targetTransform.position.x
+      // this._freeCamera.target.z = info.targetTransform.position.z
+      // this._freeCamera.position.x = info.viewerTranform.position.x
+      // this._freeCamera.position.z = info.viewerTranform.position.z
+      // box.scalingDeterminant = info.targetRadius / 50
+      // box.position.x = info.viewerTranform.position.x
+      // box.position.z = info.viewerTranform.position.z
+    })
+
+    //
   }
 
   createCamera() {
-    const cameraParent = new TransformNode('cameraParent', this._scene)
-    this._cameraParent = cameraParent
+    const camera = new FreeCamera('camera', new Vector3(0, 140, 0), this._scene)
+    camera.target = new Vector3(0, 0, 0.1)
 
-    const camera = new ArcRotateCamera('camera', 0, 1, 60, new Vector3(0, 0, 0), this._scene)
-    camera.parent = cameraParent
-
-    // remove mouse input
-    camera.inputs.removeByType('ArcRotateCameraPointersInput')
     // add hammer js input
-    const hammerJsInput = new ArcRotateCameraHammerJsInput()
-    camera.inputs.add(hammerJsInput)
-    hammerJsInput.setDebugMode(true, false)
-
+    console.log(camera.inputs)
+    camera.inputs.removeByType('FreeCameraMouseInput')
     camera.attachControl(this._canvas, true)
 
-    // camera.mapPanning = true
-    // camera.panningInertia = 0.85
-    // camera.panningSensibility = 400
-    // camera.angularSensibilityX = 4000
+    const r = camera.position.subtract(camera.target)
 
-    camera.lowerBetaLimit = 0.4
-    camera.upperBetaLimit = 1.55
-    camera.lowerRadiusLimit = 2
-    camera.upperRadiusLimit = 1200
+    const alpha = Math.atan2(r.y, r.x)
+    const beta = 0
+    const distance = 144
 
-    // camera.inertia = 0.8
-    // camera.speed = 0.05
-    // camera.angularSensibilityX = 2000
-    // camera.angularSensibilityY = 2000
-    // camera.panningSensibility = 3000
-    // camera.pinchDeltaPercentage = 0.2
-    // camera.wheelDeltaPercentage = 0.2
-    // camera.speed = 0.05
+    const rotation = new Vector3(alpha, beta, 0)
+    console.log('rotation', rotation)
+    const hammerJsInput = new HammerJsInput(this._position, this._target, rotation, distance, info => {
+      this._processInput(info)
+    })
+    hammerJsInput.setDebugMode(this._scene, true, false)
+    hammerJsInput.attachControl(this._canvas)
 
     this._camera = camera
   }

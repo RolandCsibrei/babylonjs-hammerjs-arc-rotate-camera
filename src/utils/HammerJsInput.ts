@@ -21,6 +21,7 @@ import {
   CameraInputTypes,
   Color3,
   Color4,
+  Engine,
   FreeCamera,
   ICameraInput,
   LinesMesh,
@@ -29,7 +30,9 @@ import {
   Observer,
   Scalar,
   Scene,
+  Space,
   StandardMaterial,
+  TransformNode,
   Vector2,
   Vector3
 } from '@babylonjs/core'
@@ -54,15 +57,24 @@ interface TouchInfo {
   deltaDistance: number
 }
 
-/**
- * Manage the mouse inputs to control the movement of a free camera.
- * @see https://doc.babylonjs.com/how_to/customizing_camera_inputs
- */
-export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamera> {
-  /**
-   * Defines the camera the input is attached to.
-   */
-  public camera!: ArcRotateCamera
+export interface HammerJsInputInfo {
+  targetPosition: Vector3
+  targetTarget: Vector3
+  targetAlpha: number
+  targetBeta: number
+  targetRadius: number
+  startInfo: DoubleTouchInfo
+  oldInfo: DoubleTouchInfo
+  info?: DoubleTouchInfo
+  startAlpha: number
+  p0?: TouchInfo
+  p1?: TouchInfo
+  firstTouchLow: boolean
+  targetTransform: TransformNode
+  positionTransform: TransformNode
+}
+
+export class HammerJsInput {
   private _manager?: HammerManager
 
   //
@@ -106,35 +118,37 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
 
   private _debugToConsole = false
   private _debugCamera?: ArcRotateCamera
+  private _debugScene?: Scene
   private _debugObserver: Nullable<Observer<Scene>> = null
   private _gui?: AdvancedDynamicTexture
+
+  private _targetTransform: TransformNode
+  private _positionTransform: TransformNode
 
   private _panRequired = false
   private _zoomRequired = false
   private _tiltRequired = false
   private _rotationRequired = false
 
-  // private _quadrantHistory: number[] = []
-  /**
-   * Manage the mouse inputs to control the movement of a free camera.
-   * @see https://doc.babylonjs.com/how_to/customizing_camera_inputs
-   * @param touchEnabled Defines if touch is enabled or not
-   */
+  private _quadrantCrossingCounter = 0
   constructor(
-    /**
-     * Define if touch is enabled in the mouse input
-     */
-    public panTresholdInPixels = 40,
+    public positionPosition: Vector3,
+    public targetPosition: Vector3,
+    public rotation: Vector3,
+    public inputDistance = 0,
+    public onEvent: (info: HammerJsInputInfo) => void,
+
+    public panTresholdInPixels = 10,
     public rotateTresholdInPixels = 0,
-    public xPanningRatioSingleTouch = 0.3,
-    public zPanningRatioSingleTouch = 0.3,
-    public xPanningRatio = 0.2,
-    public zPanningRatio = 0.2,
+    public xPanningRatioSingleTouch = 0.06,
+    public zPanningRatioSingleTouch = 0.06,
+    public xPanningRatio = 0.06,
+    public zPanningRatio = 0.06,
     public zoomRatio = 0.14,
-    public rotationRatio = 0.06,
+    public rotationRatio = 0.6,
     public tiltRatio = 0.002,
 
-    public rotateLerpFactor = 0.03,
+    public rotateLerpFactor = 0.05,
     public tiltLerpFactor = 0.05,
     public zoomLerpFactor = 0.1,
     public panLerpFactor = 0.07,
@@ -152,11 +166,20 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
     public disableZoom = false,
     public disableRotation = false
   ) {
-    this._oldPointer0 = ArcRotateCameraHammerJsInput._InitPointerInfo()
-    this._startPointer0 = ArcRotateCameraHammerJsInput._InitPointerInfo()
+    this._targetTransform = new TransformNode('targetTransform')
+    this._targetTransform.position = targetPosition
+    this._targetTransform.rotation.y = rotation.y
+    this._targetTransform.rotation.x = rotation.x
 
-    this._oldPointer1 = ArcRotateCameraHammerJsInput._InitPointerInfo()
-    this._startPointer1 = ArcRotateCameraHammerJsInput._InitPointerInfo()
+    this._positionTransform = new TransformNode('positionTransform')
+    this._positionTransform.parent = this._targetTransform
+    this._positionTransform.position = positionPosition
+
+    this._oldPointer0 = HammerJsInput._InitPointerInfo()
+    this._startPointer0 = HammerJsInput._InitPointerInfo()
+
+    this._oldPointer1 = HammerJsInput._InitPointerInfo()
+    this._startPointer1 = HammerJsInput._InitPointerInfo()
 
     this._oldInfo = {
       center: new Vector2(),
@@ -190,12 +213,12 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
   }
 
   private _setOldPointersInfo(pointer0: any, pointer1: any) {
-    this._oldPointer0 = ArcRotateCameraHammerJsInput._InitPointerInfo(pointer0.clientX, pointer0.clientY)
-    this._oldPointer1 = ArcRotateCameraHammerJsInput._InitPointerInfo(pointer1.clientX, pointer1.clientY)
+    this._oldPointer0 = HammerJsInput._InitPointerInfo(pointer0.clientX, pointer0.clientY)
+    this._oldPointer1 = HammerJsInput._InitPointerInfo(pointer1.clientX, pointer1.clientY)
   }
   private _setStartPointersInfo(pointer0: any, pointer1: any) {
-    this._startPointer0 = ArcRotateCameraHammerJsInput._InitPointerInfo(pointer0.clientX, pointer0.clientY)
-    this._startPointer1 = ArcRotateCameraHammerJsInput._InitPointerInfo(pointer1.clientX, pointer1.clientY)
+    this._startPointer0 = HammerJsInput._InitPointerInfo(pointer0.clientX, pointer0.clientY)
+    this._startPointer1 = HammerJsInput._InitPointerInfo(pointer1.clientX, pointer1.clientY)
   }
   private _setPointersInfo(pointer0: any, pointer1: any) {
     this._setOldPointersInfo(pointer0, pointer1)
@@ -216,15 +239,22 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
     }
   }
 
-  /**
-   * Attach the input controls to a specific dom element to get the input from.
-   * @param noPreventDefault Defines whether event caught by the controls should call preventdefault() (https://developer.mozilla.org/en-US/docs/Web/API/Event/preventDefault)
-   */
-  public attachControl(noPreventDefault?: boolean): void {
-    // noPreventDefault = Tools.BackCompatCameraNoPreventDefault(arguments)
-    const engine = this.camera.getEngine()
-    const element = <EventTarget>engine.getInputElement()
-    const manager = new Hammer.Manager(element)
+  public attachControl(attachTo: HTMLCanvasElement | Engine | Scene): void {
+    let canvas: HTMLCanvasElement | null
+    if (attachTo instanceof Scene) {
+      canvas = attachTo.getEngine().getRenderingCanvas()
+    } else if (attachTo instanceof Engine) {
+      canvas = attachTo.getRenderingCanvas()
+    } else {
+      canvas = attachTo
+    }
+
+    if (!canvas) {
+      console.warn('Unable to attach controls. No canvas found.')
+      return
+    }
+
+    const manager = new Hammer.Manager(canvas)
 
     const rotate = new Hammer.Rotate({ threshold: this.rotateTresholdInPixels })
     const pan = new Hammer.Pan({ threshold: this.panTresholdInPixels })
@@ -273,31 +303,11 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
 
     this._firstTouchLow = false
     //
-    this._targetAlpha = this.camera.alpha
-    this._targetBeta = this.camera.beta
-    this._targetRadius = this.camera.radius
-    this._targetPosition = this.camera.position.clone()
-    this._targetTarget = this.camera.target.clone()
-    //
-    this.camera.getScene().onBeforeRenderObservable.add(() => {
-      if (this._panRequired) {
-        this.camera.position = Vector3.Lerp(this.camera.position, this._targetPosition, this.panLerpFactor)
-        this.camera.target = Vector3.Lerp(this.camera.target, this._targetTarget, this.panLerpFactor)
-        // this.camera.beta = Scalar.Lerp(this.camera.beta, this._targetBeta, this.tiltLerpFactor)
-      }
-      if (this._rotationRequired) {
-        this.camera.target = Vector3.Lerp(this.camera.target, this._targetTarget, this.panLerpFactor)
-        // this.camera.beta = Scalar.Lerp(this.camera.beta, this._targetBeta, this.tiltLerpFactor)
-        this.camera.alpha = Scalar.Lerp(this.camera.alpha, this._targetAlpha, this.rotateLerpFactor)
-      }
-      this.camera.radius = Scalar.Lerp(this.camera.radius, this._targetRadius, this.zoomLerpFactor)
-
-      // this.camera.target = this._targetTarget
-      // this.camera.alpha = this._targetAlpha
-      this.camera.beta = this._targetBeta
-      // this.camera.radius = this._targetRadius
-    })
-
+    this._targetAlpha = this.rotation.y
+    this._targetBeta = this.rotation.x
+    this._targetRadius = this.inputDistance
+    this._targetPosition = this.positionPosition.clone()
+    this._targetTarget = this.targetPosition.clone()
     //
 
     manager.on('panstart', e => this._panStart(e))
@@ -310,8 +320,8 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
   }
 
   private _panMove(dx: number, dy: number) {
-    // rotate the position according to camera.alpha
-    const alpha = this._targetAlpha - Math.PI / 2
+    // rotate the position according to inputRotationAlpha
+    const alpha = this._targetTransform.rotation.y
     const c = Math.cos(alpha)
     const s = Math.sin(alpha)
     const x1 = dx
@@ -319,20 +329,17 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
     const x2 = c * x1 - s * y1
     const y2 = s * x1 + c * y1
 
+    // this._targetTransform.position.x = this._startTarget.x + x2
+    // this._targetTransform.position.z = this._startTarget.y + y2
+
+    // this._positionTransform.position.x = this._startPosition.x + x2
+    // this._positionTransform.position.z = this._startPosition.y + y2
+
     this._targetTarget.x = this._startTarget.x + x2
-    this._targetTarget.z = this._startTarget.z + y2
+    this._targetTarget.z = this._startTarget.y + y2
 
     this._targetPosition.x = this._startPosition.x + x2
-    this._targetPosition.z = this._startPosition.z + y2
-
-    // const rotationCenter = this.camera.target.clone()
-
-    // console.log(targetAlpha)
-    // this._targetPosition.rotateByQuaternionAroundPointToRef(
-    //   Quaternion.RotationAlphaBetaGamma(targetAlpha, targetBeta, 0),
-    //   rotationCenter,
-    //   this._targetPosition
-    // )
+    this._targetPosition.z = this._startPosition.y + y2
   }
 
   private _processPointer(e: PointerEvent, oldPointer: TouchInfo, startPointer: TouchInfo) {
@@ -385,13 +392,12 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
         ? 4
         : 0
 
-    // if (this._oldInfo.quadrant !== quadrant) {
-    //   console.log(this._oldInfo.quadrant, '=>', quadrant)
-    //   if (this._quadrantHistory.length > 4) {
-    //     this._quadrantHistory.shift()
-    //   }
-    //   this._quadrantHistory.push(quadrant)
-    // }
+    if (this._oldInfo.quadrant !== quadrant) {
+      const diff = quadrant - this._oldInfo.quadrant
+      this._quadrantCrossingCounter += diff
+
+      console.log(this._oldInfo.quadrant, '=>', quadrant)
+    }
     if (this._firstTouchLow) {
       if ((this._oldInfo.quadrant === 0 || this._oldInfo.quadrant === 1) && quadrant === 4) {
         if (this._startInfo.quadrant === 1) {
@@ -458,11 +464,12 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
     this._startCenterX = e.pointers[0].clientX
     this._startCenterY = e.pointers[0].clientY
 
-    this._startPosition = this.camera.position.clone()
-    this._startTarget = this.camera.target.clone()
-    this._startAlpha = this.camera.alpha
-    this._startBeta = this._getStartBeta()
-    this._targetBeta = this._startBeta
+    this._startAlpha = this._targetTransform.rotation.x
+    this._startBeta = this._targetTransform.rotation.y
+    this._startRadius = this._positionTransform.position.subtract(this._targetTransform.position).length()
+
+    this._startPosition = this._positionTransform.position.clone()
+    this._startTarget = this._targetTransform.position.clone()
   }
 
   private _pan(e: HammerInput) {
@@ -475,18 +482,13 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
       return
     }
 
-    this._logInfoToConsole()
     const dx = -(this._startCenterX - e.pointers[0].clientX)
     const dy = this._startCenterY - e.pointers[0].clientY
     this._panMove(dx * this.xPanningRatioSingleTouch, dy * this.zPanningRatioSingleTouch)
-
-    // this._panMove(
-    //   dx * (this.xPanningRatioSingleTouch + this._oldInfo.deltaDistance / 1000),
-    //   dy * (this.zPanningRatioSingleTouch + this._oldInfo.deltaDistance / 1000)
-    // )
-
     this._panRequired = true
     this._rotationRequired = false
+
+    this.onEvent(this.getInfo())
 
     this._oldPointer0.x = e.pointers[0].clientX
     this._oldPointer0.y = e.pointers[0].clientY
@@ -555,8 +557,8 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
     } else {
       this._isTilting = false
     }
-    this._startPosition = this.camera.position.clone()
-    this._startTarget = this.camera.target.clone()
+    this._startPosition = this.positionPosition.clone()
+    this._startTarget = this.targetPosition.clone()
 
     this._info = this._getCenterAngleDistance(this._startPointer0, this._startPointer1)
 
@@ -564,17 +566,12 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
 
     //
 
-    this._startAlpha = this.camera.alpha
-    this._startBeta = this._getStartBeta()
-    this._startRadius = this.camera.radius
-  }
+    // this._targetTransform.rotation.y = this._info.angle
+    // this._targetTransform.position.z = this._startTarget.y + y2
 
-  private _getStartBeta() {
-    const diff = this._startPosition.subtract(this._startTarget)
-    const beta = Math.atan2(diff.x, diff.z)
-    console.log(diff, beta)
-    // return beta
-    return this.camera.beta
+    this._startAlpha = this._targetTransform.rotation.x
+    this._startBeta = this._targetTransform.rotation.y
+    this._startRadius = this._positionTransform.position.subtract(this._targetTransform.position).length()
   }
 
   private _rotate(e: HammerInput) {
@@ -590,9 +587,6 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
     }
 
     if (!this._isTilting) {
-      if (!this.disablePan) {
-        this._panMove(info.deltaCenter.x * this.xPanningRatio, info.deltaCenter.y * this.zPanningRatio)
-      }
       if (!this.disableZoom) {
         this._targetRadius = this._startRadius + info.deltaDistance * this.zoomRatio
       }
@@ -600,18 +594,22 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
         // debugger
       }
       if (!this.disableRotation) {
-        this._targetAlpha = this._startAlpha - info.deltaAngle
+        this._targetAlpha = this.rotation.x - info.deltaAngle
+
+        this._targetTransform.rotation.x = this._targetAlpha
+      }
+
+      if (!this.disablePan) {
+        this._panMove(info.deltaCenter.x * this.xPanningRatio, info.deltaCenter.y * this.zPanningRatio)
       }
     } else {
       if (!this.disableTilt) {
-        // debugger
         this._targetBeta = this._startBeta + info.deltaCenter.y * this.tiltRatio
-        // const y = Math.tan(this._targetBeta) * this.camera.radius
-        // this._targetPosition.y = y
-        // this._panRequired = true
-        // console.log(y)
+        this._targetTransform.rotation.x = this._targetBeta
       }
     }
+
+    this.onEvent(this.getInfo())
 
     this._oldPointer0.x = e.pointers[0].clientX
     this._oldPointer0.y = e.pointers[0].clientY
@@ -625,59 +623,21 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
   }
   private _rotateEnd(e: HammerInput) {
     console.log('rotateend')
-
     this._shiftAngle = 0
-
-    // setTimeout(() => {
-    //   this._isRotating = false
-    //   this._isTilting = false
-    // }, this.singleTouchDisabledPeriodAfterDoubleTouch)
   }
 
-  /**
-   * Called on JS contextmenu event.
-   * Override this method to provide functionality.
-   */
   protected onContextMenu(evt: PointerEvent): void {
     evt.preventDefault()
   }
 
-  /**
-   * Detach the current controls from the specified dom element.
-   */
-  public detachControl(): void
-
-  /**
-   * Detach the current controls from the specified dom element.
-   * @param ignored defines an ignored parameter kept for backward compatibility. If you want to define the source input element, you can set engine.inputElement before calling camera.attachControl
-   */
-  public detachControl(ignored?: any): void {
-    this._disposeDebug()
-    //
-  }
-
-  /**
-   * Gets the class name of the current input.
-   * @returns the class name
-   */
-  public getClassName(): string {
-    return 'ArcRotateCameraHammerJsInput'
-  }
-
-  /**
-   * Get the friendly name associated with the input class.
-   * @returns the input friendly name
-   */
-  public getSimpleName(): string {
-    return 'ArcRotateCameraHammerJsInput'
-  }
-
-  public checkInputs() {
-    //
+  public detachControl(): void {
+    if (this._debugScene) {
+      this._disposeDebug(this._debugScene)
+    }
   }
 
   public getInfo() {
-    const info = {
+    const info: HammerJsInputInfo = {
       targetPosition: this._targetPosition,
       targetTarget: this._targetTarget,
       targetAlpha: this._targetAlpha,
@@ -689,25 +649,28 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
       startAlpha: this._startAlpha,
       p0: this._p0,
       p1: this._p1,
-      firstTouchLow: this._firstTouchLow
+      firstTouchLow: this._firstTouchLow,
+      targetTransform: this._targetTransform,
+      positionTransform: this._positionTransform
     }
     return info
   }
 
   // DEBUG STUFF - can be left out
 
-  public setDebugMode(enableGadgets: boolean, debugToConsole = true) {
+  public setDebugMode(scene: Scene, enableGadgets: boolean, debugToConsole = true) {
     if (enableGadgets) {
-      this._createDebug()
+      this._createDebug(scene)
     } else {
-      this._disposeDebug()
+      this._disposeDebug(scene)
     }
 
     this._debugToConsole = debugToConsole
   }
 
-  private _createDebug() {
-    const scene = this.camera.getScene()
+  private _createDebug(scene: Scene) {
+    this._debugScene = scene
+
     const engine = scene.getEngine()
 
     if (scene.activeCameras) {
@@ -797,10 +760,8 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
           const rh = 12
 
           if (touch1Button.textBlock) {
-            touch1Button.textBlock.text = `${this._oldPointer0.x}, ${this._oldPointer0.y}\nΔ ${this._oldPointer0.deltaCenter.x}, ${
-              this._oldPointer0.deltaCenter.y
-            }
-            sbeta ${this._startBeta.toPrecision(3)}\ntbeta ${this._targetBeta.toPrecision(3)}\ncbeta ${this.camera.beta.toPrecision(3)}`
+            touch1Button.textBlock.text = `${this._oldPointer0.x}, ${this._oldPointer0.y}\nΔ ${this._oldPointer0.deltaCenter.x}, ${this._oldPointer0.deltaCenter.y}`
+            // sbeta ${this._startBeta.toPrecision(3)}\ntbeta ${this._targetBeta.toPrecision(3)}\ncbeta ${this.inputRo.toPrecision(3)}`
           }
           touch1Button.leftInPixels = this._oldPointer0.x - renderWidth / 2
           touch1Button.topInPixels = this._oldPointer0.y - renderHeight / 2 - 50
@@ -813,14 +774,14 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
 
           if (centerButton.textBlock) {
             // ${this._oldInfo.center.x}, ${this._oldInfo.center.y}\n
-            // centerButton.textBlock.text = `srad ${this._startInfo.angle.toPrecision(3)}\nshift ${this._shiftAngle.toPrecision(
-            //   3
-            // )}\nΔ rad ${this._oldInfo.deltaAngle.toPrecision(3)}\nrad ${this._oldInfo.angle.toPrecision(3)}\nalpha ${this.camera.alpha.toPrecision(3)}\nq ${
-            //   this._oldInfo.quadrant
-            // }`
-            centerButton.textBlock.text = `sbeta ${this._startBeta.toPrecision(3)}\ntbeta ${this._targetBeta.toPrecision(
+            centerButton.textBlock.text = `srad ${this._startInfo.angle.toPrecision(3)}\nshift ${this._shiftAngle.toPrecision(
               3
-            )}\ncbeta ${this.camera.beta.toPrecision(3)}`
+            )}\nΔ rad ${this._oldInfo.deltaAngle.toPrecision(3)}\nrad ${this._oldInfo.angle.toPrecision(3)}\nalpha ${this.rotation.y.toPrecision(3)}\nq ${
+              this._oldInfo.quadrant
+            }`
+            // centerButton.textBlock.text = `sbeta ${this._startBeta.toPrecision(3)}\ntbeta ${this._targetBeta.toPrecision(
+            //   3
+            // )}\ncbeta ${this.inputRo.toPrecision(3)}`
           }
           centerButton.leftInPixels = this._oldInfo.center.x - renderWidth / 2
           centerButton.topInPixels = this._oldInfo.center.y - renderHeight / 2 - 60
@@ -886,8 +847,7 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
     }
   }
 
-  private _disposeDebug() {
-    const scene = this.camera.getScene()
+  private _disposeDebug(scene: Scene) {
     const debugCamera = scene.getCameraByName('debugCamera')
     debugCamera?.dispose()
 
@@ -945,7 +905,7 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
       //     'i.deltaAngle',
       //     (this._info.deltaAngle * 180) / Math.PI,
       //     'c.alpha',
-      //     (this.camera.alpha * 180) / Math.PI,
+      //     (this.inputRotationAlpha * 180) / Math.PI,
       //     'i.dc.x',
       //     this._info.deltaCenter.x,
       //     'i.dc.y',
@@ -971,7 +931,6 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
         'startInfo.angle',
         this._startInfo.angle,
         (this._startInfo.angle * 180) / Math.PI,
-
         'info.angle',
         this._info.angle,
         (this._info.angle * 180) / Math.PI,
@@ -981,15 +940,9 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
         'targetAlpha',
         this._targetAlpha,
         (this._targetAlpha * 180) / Math.PI,
-        'camera.alpha',
-        this.camera.alpha,
-        (this.camera.alpha * 180) / Math.PI,
-        'targetBeta',
-        this._targetBeta,
-        (this._targetBeta * 180) / Math.PI,
-        'camera.beta',
-        this.camera.beta,
-        (this.camera.beta * 180) / Math.PI,
+        'inputRotationAlpha',
+        this.rotation.y,
+        (this.rotation.y * 180) / Math.PI,
         'info.deltaCenter.x',
         this._info.deltaCenter.x,
         'info.deltaCenter.y',
@@ -1008,6 +961,3 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
     }
   }
 }
-
-// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-;(<any>CameraInputTypes)['ArcRotateCameraHammerJsInput'] = ArcRotateCameraHammerJsInput

@@ -7,7 +7,7 @@
 <script lang="ts">
 import { Engine } from '@babylonjs/core'
 import { computed, defineComponent, onMounted, onUnmounted, Ref, ref } from '@vue/composition-api'
-import { HammerJsInputTestScene } from 'src/scenes/HammerJsInputTestScene'
+import { HammerJsInputTestScene } from 'src/scenes/ArcRotateCameraHammerJsInputTestScene'
 
 export default defineComponent({
   name: 'PageIndex',
