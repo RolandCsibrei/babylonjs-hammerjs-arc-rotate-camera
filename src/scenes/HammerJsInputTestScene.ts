@@ -20,20 +20,15 @@ import {
 } from '@babylonjs/core'
 import '@babylonjs/loaders'
 
-import { moveCameraTo } from '../utils/camera'
-import { HammerJsInput, HammerJsInputInfo } from '../utils/HammerJsInput'
 import { BaseScene } from './BaseScene'
 import { GridMaterial } from '@babylonjs/materials'
+import { ArcRotateCameraHammerJsInput } from 'src/utils/ArcRotateCameraHammerJsInput'
 
 export class HammerJsInputTestScene extends BaseScene {
   private _cameraParent!: TransformNode
 
   private _target: Vector3 = new Vector3(0, 0, 0)
   private _position: Vector3 = new Vector3(0, 0, 0)
-
-  private get _freeCamera() {
-    return <FreeCamera>this._camera
-  }
 
   constructor(canvas: HTMLCanvasElement) {
     super(canvas)
@@ -47,7 +42,34 @@ export class HammerJsInputTestScene extends BaseScene {
 
   private async _loadMeshes() {
     const loaded = await SceneLoader.ImportMeshAsync('', '3dmodels/', 'pokemons.glb', this._scene)
-    // this._dudeMeshes = loaded.meshes
+
+    const radius = 80
+    const count = loaded.meshes.length
+    for (let i = 1; i < count; i++) {
+      const mesh = loaded.meshes[i]
+
+      const alpha = ((Math.PI * 2) / (count - 1)) * (i - 1)
+      mesh.isPickable = true
+      const c = Math.cos(alpha) * radius
+      const s = Math.sin(alpha) * radius
+      const x1 = 1
+      const y1 = 1
+      const x2 = c * x1 - s * y1
+      const y2 = s * x1 + c * y1
+
+      mesh.rotation = new Vector3(0, 0, 0)
+      mesh.rotation.x = 0
+
+      mesh.position = new Vector3(x2, 0, y2)
+      mesh.lookAt(new Vector3(0, 0, 0))
+      mesh.rotation.x = 0
+      mesh.position.y = 0
+
+      const material = new StandardMaterial('material', this._scene)
+      material.emissiveColor = Color3.Random()
+      mesh.material = material
+    }
+
     return loaded.meshes
   }
 
@@ -56,15 +78,15 @@ export class HammerJsInputTestScene extends BaseScene {
     this._createObjects()
     await this._createSkyBox()
 
-    await this._scene.debugLayer.show({
-      embedMode: false,
-      overlay: true
-    })
+    // await this._scene.debugLayer.show({
+    //   embedMode: false,
+    //   overlay: true
+    // })
   }
 
   private async _createSkyBox(): Promise<void> {
     return new Promise((resolve, reject) => {
-      const skybox = MeshBuilder.CreateBox('skyBox', { size: 10000.0 }, this._scene)
+      const skybox = MeshBuilder.CreateBox('skyBox', { size: 2000.0 }, this._scene)
       const skyboxMaterial = new StandardMaterial('skyBox', this._scene)
       skyboxMaterial.backFaceCulling = false
       const files = [
@@ -100,111 +122,33 @@ export class HammerJsInputTestScene extends BaseScene {
 
     const groundMaterial = new GridMaterial('groundMaterial', this._scene)
 
-    const ground = MeshBuilder.CreateGround('ground', { height: 100, width: 100 }, this._scene)
+    const ground = MeshBuilder.CreateGround('ground', { height: 1000, width: 1000 }, this._scene)
     ground.material = groundMaterial
     ground.visibility = 0.5
-
-    //
-    const boxMaterial = new StandardMaterial('boxMaterial', this._scene)
-    boxMaterial.emissiveColor = Color3.Red().scale(0.4)
-
-    const box = MeshBuilder.CreateBox('box', { size: 8 }, this._scene)
-    // box.parent = parent
-    box.position.x = -12
-    box.material = boxMaterial
-
-    const markerPosition = MeshBuilder.CreateCylinder('markerPosition', { diameterTop: 0, diameterBottom: 4, height: 20 }, this._scene)
-    markerPosition.rotation.x = Math.PI / 2
-    markerPosition.bakeCurrentTransformIntoVertices()
-    markerPosition.position = this._freeCamera.getFrontPosition(100)
-    markerPosition.lookAt(this._freeCamera.target)
-    markerPosition.position.y = 10
-    const markerTarget = MeshBuilder.CreateCylinder('markerTarget', { diameterTop: 0, diameterBottom: 4, height: 12 }, this._scene)
-    markerTarget.position = this._freeCamera.target.clone()
-    // box.parent = parent
-
-    //
-
-    const sphereMaterial = new StandardMaterial('sphereMaterial', this._scene)
-    sphereMaterial.emissiveColor = Color3.Green().scale(0.4)
-
-    markerPosition.material = boxMaterial
-    markerTarget.material = sphereMaterial
-
-    const sphere = Mesh.CreateSphere('sphere', 32, 6, this._scene)
-    sphere.parent = parent
-    sphere.material = sphereMaterial
-
-    //
-
-    const kokkiMaterial = new StandardMaterial('kokkiMaterial', this._scene)
-    kokkiMaterial.emissiveColor = Color3.Blue().scale(0.4)
-
-    const kokki = MeshBuilder.CreateCylinder('kokki', { diameterTop: 0, diameterBottom: 4, height: 4 }, this._scene)
-    kokki.parent = parent
-    kokki.material = kokkiMaterial
-    kokki.position.x = 10
+    ground.position.y = -40
 
     //
 
     new AxesViewer(this._scene, 10)
   }
 
-  private _processInput(info: HammerJsInputInfo) {
-    console.log(info)
-    const markerPosition = this._scene.getMeshByName('markerPosition')
-    if (markerPosition) {
-      markerPosition.parent = info.positionTransform
-    }
-    const markerTarget = this._scene.getMeshByName('markerTarget')
-    if (markerTarget) {
-      markerTarget.parent = info.targetTransform
-      markerTarget.position.y = 10
-    }
+  async createCamera() {
+    const camera = new ArcRotateCamera('camera', 0, 1.2, 200, new Vector3(15, 5, 0), this._scene)
 
-    const panLerpFactor = 0.0005
-    // this._freeCamera.parent = info.targetTransform
-    this._scene.onBeforeRenderObservable.add(() => {
-      // this._freeCamera.position = Vector3.Lerp(this._freeCamera.position, info.positionTransform.position, panLerpFactor)
+    camera.minZ = 0.1
+    camera.maxZ = 2200
+    camera.lowerBetaLimit = 0.4
+    camera.upperBetaLimit = 1.55
+    camera.lowerRadiusLimit = 2
+    camera.upperRadiusLimit = 1200
 
-      this._freeCamera.position = info.positionTransform.position.clone()
-      this._freeCamera.lockedTarget = info.targetTransform.position.clone()
+    camera.attachControl(true, true, 0)
 
-      // if (this._panRequired) {
-      // this._freeCamera.target.x = info.targetTransform.position.x
-      // this._freeCamera.target.z = info.targetTransform.position.z
-      // this._freeCamera.position.x = info.viewerTranform.position.x
-      // this._freeCamera.position.z = info.viewerTranform.position.z
-      // box.scalingDeterminant = info.targetRadius / 50
-      // box.position.x = info.viewerTranform.position.x
-      // box.position.z = info.viewerTranform.position.z
-    })
+    const input = new ArcRotateCameraHammerJsInput()
+    camera.inputs.removeByType('ArcRotateCameraPointersInput')
+    camera.inputs.add(input)
 
-    //
-  }
-
-  createCamera() {
-    const camera = new FreeCamera('camera', new Vector3(0, 140, 0), this._scene)
-    camera.target = new Vector3(0, 0, 0.1)
-
-    // add hammer js input
-    console.log(camera.inputs)
-    camera.inputs.removeByType('FreeCameraMouseInput')
-    camera.attachControl(this._canvas, true)
-
-    const r = camera.position.subtract(camera.target)
-
-    const alpha = Math.atan2(r.y, r.x)
-    const beta = 0
-    const distance = 144
-
-    const rotation = new Vector3(alpha, beta, 0)
-    console.log('rotation', rotation)
-    const hammerJsInput = new HammerJsInput(this._position, this._target, rotation, distance, info => {
-      this._processInput(info)
-    })
-    hammerJsInput.setDebugMode(this._scene, true, false)
-    hammerJsInput.attachControl(this._canvas)
+    await input.setDebugMode(true)
 
     this._camera = camera
   }
@@ -217,14 +161,9 @@ export class HammerJsInputTestScene extends BaseScene {
   public async initScene() {
     this._scene.clearColor = new Color4(0, 0, 0, 1)
 
-    this.createCamera()
+    await this.createCamera()
     this.createLight()
 
     await this._createDemo()
-  }
-
-  private _animateCamera(alpha: number, beta: number, radius: number, target?: Vector3) {
-    const arcCamera = <ArcRotateCamera>this._camera
-    moveCameraTo(arcCamera, null, target, alpha, beta, radius)
   }
 }

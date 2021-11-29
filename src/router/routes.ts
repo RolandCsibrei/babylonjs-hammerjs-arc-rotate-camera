@@ -6,11 +6,11 @@ const routes: RouteConfig[] = [
     component: () => import('layouts/MainLayout.vue'),
     children: [{ path: '', component: () => import('src/pages/HammerJsInputTestPage.vue') }]
   },
-  {
-    path: '/topview',
-    component: () => import('layouts/MainLayout.vue'),
-    children: [{ path: '', component: () => import('src/pages/HammerJsInputOrthoTestPage.vue') }]
-  },
+  // {
+  //   path: '/topview',
+  //   component: () => import('layouts/MainLayout.vue'),
+  //   children: [{ path: '', component: () => import('src/pages/HammerJsInputOrthoTestPage.vue') }]
+  // },
 
   // Always leave this as last one,
   // but you can also remove it
