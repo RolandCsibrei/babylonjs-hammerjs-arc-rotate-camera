@@ -131,6 +131,9 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
 
   public tiltTouchDistanceTresholdInPixelsX = 50
   public tiltTouchDistanceTresholdInPixelsY = 70
+
+  public tiltTouchDistanceAngleTreshold = 0.28 // radians
+
   public disablePan = false
   public disableTilt = false
   public disableZoom = false
@@ -448,16 +451,21 @@ export class ArcRotateCameraHammerJsInput implements ICameraInput<ArcRotateCamer
 
     //
 
+    this._info = this._getCenterAngleDistance(this._startTouchInfo0, this._startTouchInfo1)
+    // if (
+    //   Math.abs(this._startTouchInfo0.y - this._startTouchInfo1.y) < this.tiltTouchDistanceTresholdInPixelsY &&
+    //   Math.abs(this._startTouchInfo0.x - this._startTouchInfo1.x) > this.tiltTouchDistanceTresholdInPixelsX
+    // ) {
     if (
-      Math.abs(this._startTouchInfo0.y - this._startTouchInfo1.y) < this.tiltTouchDistanceTresholdInPixelsY &&
-      Math.abs(this._startTouchInfo0.x - this._startTouchInfo1.x) > this.tiltTouchDistanceTresholdInPixelsX
+      (this._info.angle > Math.PI / 2 - this.tiltTouchDistanceAngleTreshold && this._info.quadrant === 1) ||
+      (this._info.angle < Math.PI / 2 + this.tiltTouchDistanceAngleTreshold && this._info.quadrant === 2) ||
+      (this._info.angle > Math.PI * 1.5 - this.tiltTouchDistanceAngleTreshold && this._info.quadrant === 3) ||
+      (this._info.angle < Math.PI * 1.5 + this.tiltTouchDistanceAngleTreshold && this._info.quadrant === 4)
     ) {
       this._isTilting = true
     } else {
       this._isTilting = false
     }
-
-    this._info = this._getCenterAngleDistance(this._startTouchInfo0, this._startTouchInfo1)
 
     this._startDoubleTouchInfo = { ...this._info }
     this._previousDoubleTouchInfo = { ...this._info }
