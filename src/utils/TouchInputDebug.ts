@@ -207,7 +207,7 @@ export class TouchInputDebug {
             }
 
             x -= sw
-            y -= sh + iconSize * 3 + 20
+            y -= sh //  + iconSize * 3 + 20
           }
           pan.isVisible = false
           zoom.isVisible = false
