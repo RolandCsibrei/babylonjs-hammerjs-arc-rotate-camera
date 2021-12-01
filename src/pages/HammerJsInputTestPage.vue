@@ -1,5 +1,17 @@
 <template>
   <q-page>
+    <q-page-sticky position="top-left" :offset="[16, 16]">
+      <div class="row items-center bjs-link">
+        <q-img
+          src="bjs-logo.png"
+          spinner-color="white"
+          style="height: 64px; width: 64px"
+          class="col animated flip bjs-logo bjs-link"
+          @click="gotoBabylonSite"
+        />
+        <div class="text-h6 text-white bjs-link" @click="gotoBabylonSite">Powered by BabylonJS</div>
+      </div>
+    </q-page-sticky>
     <canvas ref="bjsCanvas" width="1920" height="1080" class="bjs-canvas" />
   </q-page>
 </template>
