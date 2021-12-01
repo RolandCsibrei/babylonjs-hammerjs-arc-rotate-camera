@@ -22,6 +22,12 @@ export class TouchInputDebug {
   private _debugObserver: Nullable<Observer<Scene>> = null
   private _debugCamera?: ArcRotateCamera
   private _existingGui = false
+
+  public enableTargetAxis = false
+  public enableDebugValues = false
+  public enableHelperIcons = false
+  public enableLine = false
+
   constructor(
     public input: ArcRotateCameraHammerJsInput,
     private _scene: Scene,
@@ -146,6 +152,9 @@ export class TouchInputDebug {
       const renderHeight = engine.getRenderHeight()
 
       this._debugObserver = scene.onBeforeRenderObservable.add(() => {
+        axisParent.setEnabled(this.enableTargetAxis)
+        lines.setEnabled(this.enableLine)
+
         const info = this.input.getInfo()
 
         if (this.debugToConsole) {
@@ -162,19 +171,33 @@ export class TouchInputDebug {
 
         //
 
-        if (this._gui) {
+        if (this._gui && this.enableHelperIcons) {
+          const pan = this._gui.getControlByName('touchHelperPanImage')
+          const zoom = this._gui.getControlByName('touchHelperZoomImage')
+          const rotate = this._gui.getControlByName('touchHelperRotateImage')
+          const tilt = this._gui.getControlByName('touchHelperTiltImage')
+
+          if (!(pan && zoom && rotate && tilt)) {
+            return
+          }
+
+          pan.isEnabled = this.enableHelperIcons
+          zoom.isEnabled = this.enableHelperIcons
+          rotate.isEnabled = this.enableHelperIcons
+          tilt.isEnabled = this.enableHelperIcons
+
           const iconSize = 48
 
           const sw = renderWidth / 2
           const sh = renderHeight / 2
 
-          if (info.touchInfo0 && info.touchInfo1) {
-            let x
-            let y
+          let x = 0
+          let y = 0
+          if (info.touchInfo0) {
             if (info.isPanning) {
               x = info.touchInfo0.x //- iconSize / 2
               y = info.touchInfo0.y - iconSize
-            } else {
+            } else if (info.touchInfo1) {
               const bx = Math.min(info.touchInfo0.x, info.touchInfo1.x)
               const by = Math.min(info.touchInfo0.y, info.touchInfo1.y)
               const dx = Math.abs(info.touchInfo0.x - info.touchInfo1.x)
@@ -185,25 +208,13 @@ export class TouchInputDebug {
 
             x -= sw
             y -= sh + iconSize * 3 + 20
+          }
+          pan.isVisible = false
+          zoom.isVisible = false
+          rotate.isVisible = false
+          tilt.isVisible = false
 
-            const pan = this._gui.getControlByName('touchHelperPanImage')
-            const zoom = this._gui.getControlByName('touchHelperZoomImage')
-            const rotate = this._gui.getControlByName('touchHelperRotateImage')
-            const tilt = this._gui.getControlByName('touchHelperTiltImage')
-
-            if (!(pan && zoom && rotate && tilt)) {
-              return
-            }
-
-            pan.isVisible = false
-            zoom.isVisible = false
-            rotate.isVisible = false
-            tilt.isVisible = false
-
-            if (info.isFinal) {
-              return
-            }
-
+          if (!info.isFinal) {
             //
 
             if (info.isPanning) {
@@ -236,99 +247,119 @@ export class TouchInputDebug {
         //
 
         if (this._debugCamera) {
-          const rw = 22
-          const rh = 12
-
-          if (touch1Button.textBlock) {
-            touch1Button.textBlock.text = `${info.previousTouchInfo0.x}, ${info.previousTouchInfo0.y}\nΔ ${info.previousTouchInfo0.deltaCenter.x}, ${
-              info.previousTouchInfo0.deltaCenter.y
-            }
-          sbeta ${info.startBeta.toPrecision(3)}\ntbeta ${info.targetBeta.toPrecision(3)}\ncbeta ${this._camera.beta.toPrecision(3)}`
-          }
-          touch1Button.leftInPixels = info.previousTouchInfo0.x - renderWidth / 2
-          touch1Button.topInPixels = info.previousTouchInfo0.y - renderHeight / 2 - 50
-
-          if (touch2Button.textBlock) {
-            touch2Button.textBlock.text = `${info.previousTouchInfo1.x}, ${info.previousTouchInfo1.y}\nΔ ${info.previousTouchInfo1.deltaCenter.x}, ${info.previousTouchInfo1.deltaCenter.y}`
-          }
-          touch2Button.leftInPixels = info.previousTouchInfo1.x - renderWidth / 2
-          touch2Button.topInPixels = info.previousTouchInfo1.y - renderHeight / 2 - 60
-
-          if (centerButton.textBlock && info.doubleTouchInfo) {
-            // ${touchInfo.previousInfo.center.x}, ${touchInfo.previousInfo.center.y}\n
-            centerButton.textBlock.text = `srad ${info.doubleTouchInfo.angle.toPrecision(3)}\nshift ${info.shiftAngle.toPrecision(
-              3
-            )}\nΔ rad ${info.previousDoubleTouchInfo.deltaAngle.toPrecision(3)}\nrad ${info.previousDoubleTouchInfo.angle.toPrecision(
-              3
-            )}\nalpha ${this._camera.alpha.toPrecision(3)}\nq ${info.previousDoubleTouchInfo.quadrant}`
-            // centerButton.textBlock.text = `sbeta ${touchInfo.Beta.toPrecision(3)}\ntbeta ${touchInfo.targetBeta.toPrecision(
-            //   3
-            // )}\ncbeta ${this.camera.beta.toPrecision(3)}`
-          }
-
-          centerButton.leftInPixels = info.previousDoubleTouchInfo.center.x - renderWidth / 2
-          centerButton.topInPixels = info.previousDoubleTouchInfo.center.y - renderHeight / 2 - 60
-
-          let x = mapValue(info.previousTouchInfo0.x, 0, renderWidth, -rw, rw)
-          let y = mapValue(info.previousTouchInfo0.y, 0, renderHeight, rh, -rh)
-          touch1Marker.position.x = x
-          touch1Marker.position.y = y
-          touch1Marker.position.z = 0
-
-          x = mapValue(info.previousTouchInfo1.x, 0, renderWidth, -rw, rw)
-          y = mapValue(info.previousTouchInfo1.y, 0, renderHeight, rh, -rh)
-          touch2Marker.position.x = x
-          touch2Marker.position.y = y
-          touch2Marker.position.z = 0
-
-          if (info.touchInfo0) {
-            x = mapValue(info.touchInfo0.x, 0, renderWidth, -rw, rw)
-            y = mapValue(info.touchInfo0.y, 0, renderHeight, rh, -rh)
-            startTouch1Marker.position.x = x
-            startTouch1Marker.position.y = y
-            startTouch1Marker.position.z = 0
-          }
-
-          if (info.touchInfo1) {
-            x = mapValue(info.touchInfo1.x, 0, renderWidth, -rw, rw)
-            y = mapValue(info.touchInfo1.y, 0, renderHeight, rh, -rh)
-            startTouch2Marker.position.x = x
-            startTouch2Marker.position.y = y
-            startTouch2Marker.position.z = 0
-          }
-
-          if (info.previousDoubleTouchInfo.distance < 1) {
-            startTouch2Marker.isVisible = false
-
-            touch2Marker.isVisible = false
+          if (!this.enableDebugValues) {
+            touch1Button.isVisible = false
             touch2Button.isVisible = false
-
-            centerMarker.isVisible = false
             centerButton.isVisible = false
+            touch1Marker.setEnabled(false)
+            touch2Marker.setEnabled(false)
+            centerMarker.setEnabled(false)
+            startTouch1Marker.setEnabled(false)
+            startTouch2Marker.setEnabled(false)
           } else {
-            startTouch2Marker.isVisible = true
-
-            touch2Marker.isVisible = true
+            touch1Button.isVisible = true
             touch2Button.isVisible = true
-
-            centerMarker.isVisible = true
             centerButton.isVisible = true
+            touch1Marker.setEnabled(true)
+            touch2Marker.setEnabled(true)
+            centerMarker.setEnabled(true)
+            startTouch1Marker.setEnabled(true)
+            startTouch2Marker.setEnabled(true)
+
+            const rw = 22
+            const rh = 12
+
+            if (touch1Button.textBlock) {
+              touch1Button.textBlock.text = `${info.previousTouchInfo0.x}, ${info.previousTouchInfo0.y}\nΔ ${info.previousTouchInfo0.deltaCenter.x}, ${
+                info.previousTouchInfo0.deltaCenter.y
+              }
+          sbeta ${info.startBeta.toPrecision(3)}\ntbeta ${info.targetBeta.toPrecision(3)}\ncbeta ${this._camera.beta.toPrecision(3)}`
+            }
+            touch1Button.leftInPixels = info.previousTouchInfo0.x - renderWidth / 2
+            touch1Button.topInPixels = info.previousTouchInfo0.y - renderHeight / 2 - 50
+
+            if (touch2Button.textBlock) {
+              touch2Button.textBlock.text = `${info.previousTouchInfo1.x}, ${info.previousTouchInfo1.y}\nΔ ${info.previousTouchInfo1.deltaCenter.x}, ${info.previousTouchInfo1.deltaCenter.y}`
+            }
+            touch2Button.leftInPixels = info.previousTouchInfo1.x - renderWidth / 2
+            touch2Button.topInPixels = info.previousTouchInfo1.y - renderHeight / 2 - 60
+
+            if (centerButton.textBlock && info.doubleTouchInfo) {
+              // ${touchInfo.previousInfo.center.x}, ${touchInfo.previousInfo.center.y}\n
+              centerButton.textBlock.text = `srad ${info.doubleTouchInfo.angle.toPrecision(3)}\nshift ${info.shiftAngle.toPrecision(
+                3
+              )}\nΔ rad ${info.previousDoubleTouchInfo.deltaAngle.toPrecision(3)}\nrad ${info.previousDoubleTouchInfo.angle.toPrecision(
+                3
+              )}\nalpha ${this._camera.alpha.toPrecision(3)}\nq ${info.previousDoubleTouchInfo.quadrant}`
+              // centerButton.textBlock.text = `sbeta ${touchInfo.Beta.toPrecision(3)}\ntbeta ${touchInfo.targetBeta.toPrecision(
+              //   3
+              // )}\ncbeta ${this.camera.beta.toPrecision(3)}`
+            }
+
+            centerButton.leftInPixels = info.previousDoubleTouchInfo.center.x - renderWidth / 2
+            centerButton.topInPixels = info.previousDoubleTouchInfo.center.y - renderHeight / 2 - 60
+
+            let x = mapValue(info.previousTouchInfo0.x, 0, renderWidth, -rw, rw)
+            let y = mapValue(info.previousTouchInfo0.y, 0, renderHeight, rh, -rh)
+            touch1Marker.position.x = x
+            touch1Marker.position.y = y
+            touch1Marker.position.z = 0
+
+            x = mapValue(info.previousTouchInfo1.x, 0, renderWidth, -rw, rw)
+            y = mapValue(info.previousTouchInfo1.y, 0, renderHeight, rh, -rh)
+            touch2Marker.position.x = x
+            touch2Marker.position.y = y
+            touch2Marker.position.z = 0
+
+            if (info.touchInfo0) {
+              x = mapValue(info.touchInfo0.x, 0, renderWidth, -rw, rw)
+              y = mapValue(info.touchInfo0.y, 0, renderHeight, rh, -rh)
+              startTouch1Marker.position.x = x
+              startTouch1Marker.position.y = y
+              startTouch1Marker.position.z = 0
+            }
+
+            if (info.touchInfo1) {
+              x = mapValue(info.touchInfo1.x, 0, renderWidth, -rw, rw)
+              y = mapValue(info.touchInfo1.y, 0, renderHeight, rh, -rh)
+              startTouch2Marker.position.x = x
+              startTouch2Marker.position.y = y
+              startTouch2Marker.position.z = 0
+            }
+
+            if (info.previousDoubleTouchInfo.distance < 1) {
+              startTouch2Marker.isVisible = false
+
+              touch2Marker.isVisible = false
+              touch2Button.isVisible = false
+
+              centerMarker.isVisible = false
+              centerButton.isVisible = false
+            } else {
+              startTouch2Marker.isVisible = true
+
+              touch2Marker.isVisible = true
+              touch2Button.isVisible = true
+
+              centerMarker.isVisible = true
+              centerButton.isVisible = true
+            }
+            x = mapValue(info.previousDoubleTouchInfo.center.x, 0, renderWidth, -rw, rw)
+            y = mapValue(info.previousDoubleTouchInfo.center.y, 0, renderHeight, rh, -rh)
+            centerMarker.position.x = x
+            centerMarker.position.y = y
+            centerMarker.position.z = 0
+
+            debugLineOptions.points[0].x = touch1Marker.position.x
+            debugLineOptions.points[0].y = touch1Marker.position.y
+            debugLineOptions.points[1].x = touch2Marker.position.x
+            debugLineOptions.points[1].y = touch2Marker.position.y
+
+            debugLineOptions.instance = lines
+
+            lines = MeshBuilder.CreateLines('debugLines', debugLineOptions)
+            lines.layerMask = 0x20000000
           }
-          x = mapValue(info.previousDoubleTouchInfo.center.x, 0, renderWidth, -rw, rw)
-          y = mapValue(info.previousDoubleTouchInfo.center.y, 0, renderHeight, rh, -rh)
-          centerMarker.position.x = x
-          centerMarker.position.y = y
-          centerMarker.position.z = 0
-
-          debugLineOptions.points[0].x = touch1Marker.position.x
-          debugLineOptions.points[0].y = touch1Marker.position.y
-          debugLineOptions.points[1].x = touch2Marker.position.x
-          debugLineOptions.points[1].y = touch2Marker.position.y
-
-          debugLineOptions.instance = lines
-
-          lines = MeshBuilder.CreateLines('debugLines', debugLineOptions)
-          lines.layerMask = 0x20000000
         }
       })
     }
@@ -381,6 +412,7 @@ export class TouchInputDebug {
 
     adt.addControl(btn)
 
+    btn.isEnabled = false
     return btn
   }
 
